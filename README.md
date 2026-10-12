@@ -63,6 +63,18 @@ raw = rj.run_cov([sA, sB], {(0, 0): corr_AA, (0, 1): corr_AB, (1, 1): corr_BB}, 
 ```
 Here `corr_AB` holds the cross pair counts and cross-correlation function between the two redshift bins.
 
+## Examples
+
+* `notebooks/01_quickstart_periodic_box.ipynb` – synthetic box, comparison with the analytic Gaussian covariance;
+* `notebooks/02_desi_dr2_jackknife.ipynb` – DESI DR2 LRG per-cap run with jackknife calibration, comparison with the
+  official RascalC covariance and the GLAM-Uchuu mocks, NGC+SGC combination;
+* `notebooks/03_overlapping_redshift_bins.ipynb` – joint covariance of two overlapping redshift bins.
+
+Validation scripts in `scripts/`: `gaussian_box.py` (analytic Gaussian covariance), `bruteforce_check.py` and
+`bruteforce_multi.py` (exact sums on small catalogs, single and multi-sample), `compare_rascalc_box.py` /
+`compare_rascalc_jackknife.py` (RascalC C++ head-to-head; note the C++ periodic mode is biased high by a few
+percent in C3/C4, its aperiodic mode is not), `desi_dr2_*.py` (DESI DR2 pipeline).
+
 ## Layout
 
 * `catalog.py` – catalogs and samples; `grid.py` – cell grid; `kernels.py` – importance-sampling kernels;

@@ -44,9 +44,8 @@ def project_joint(cov_smu: Array, binning: Binning, n_corr: int) -> Array:
     """Project a joint covariance in ``(corr, s, mu)`` bins to ``(corr, s, ell)`` (identity for s_mu output)."""
     n_bins = binning.n_bins
     P = binning.projection_matrix()
-    c = cov_smu.reshape(n_corr, n_bins, n_corr, n_bins)
-    c = np.einsum("iajb,ap,bq->ipjq", c, P, P)
-    return c.reshape(n_corr * binning.n_out, n_corr * binning.n_out)
+    big = np.kron(np.eye(n_corr), P)  # block-diagonal projection of the joint vector
+    return big.T @ cov_smu @ big
 
 
 def disconnected_term(raw: RawCovariance) -> Array:
@@ -189,10 +188,16 @@ def check_eigval_convergence(c2: Array, c4: Array, alpha: float = 1.0, kind: str
     return ok
 
 
-def check_positive_definite(cov: Array) -> None:
+def check_positive_definite(cov: Array, log: Callable = print, strict: bool = False) -> bool:
+    """Check positive definiteness; warn (or raise with ``strict=True``) if the covariance is not."""
     ev = np.linalg.eigvalsh(cov)
     if np.any(ev <= 0):
-        raise ValueError(f"The covariance is not positive definite (min eigenvalue {ev.min():.3e}); insufficient convergence")
+        msg = f"The covariance is not positive definite (min eigenvalue {ev.min():.3e}, max {ev.max():.3e}); insufficient convergence"
+        if strict:
+            raise ValueError(msg)
+        log("WARNING: " + msg)
+        return False
+    return True
 
 
 # ----------------------------------------------------------------------------------------------
@@ -311,12 +316,15 @@ def convergence_check_extra(partial_cov: Array, log: Callable = print) -> dict:
 # Main post-processing
 # ----------------------------------------------------------------------------------------------
 def post_process(raw: RawCovariance, *, mock_cov: Array | None = None, alphas=None, skip_s_bins=0, skip_l: int = 0,
-                 disconnected: bool = True, alpha_method: str = "joint", out_file: str | None = None, log: Callable = print) -> dict:
+                 disconnected: bool = True, alpha_method: str = "joint", strict: bool = False, out_file: str | None = None,
+                 log: Callable = print) -> dict:
     """Assemble the final covariance from raw terms.
 
     The shot-noise rescaling is fitted to the jackknife covariance if the raw terms contain jackknife estimates,
     or to ``mock_cov`` (a joint covariance of all correlations in the output bins, e.g. from :func:`sample_covariance`)
     if given; otherwise the given ``alphas`` (default 1 for every catalog) are used.
+
+    With ``strict=True`` a non-positive-definite covariance raises instead of warning.
 
     Returns a dictionary (also saved as ``out_file`` if given) with the full covariance, precision matrix, N_eff,
     the per-subsample covariances, the shot-noise rescalings and, with jackknives, the jackknife data and theory
@@ -360,7 +368,7 @@ def post_process(raw: RawCovariance, *, mock_cov: Array | None = None, alphas=No
     c2, c3, c4 = terms.term_means()
     check_eigval_convergence(c2.sum(axis=0), c4, float(np.min(alphas)), kind="Full", log=log)
     full_cov = terms.total(alphas)
-    check_positive_definite(full_cov)
+    out["positive_definite"] = check_positive_definite(full_cov, log, strict)
     partial = terms.total(alphas, subsamples=True)
     D, prec = compute_D_precision_matrix(partial, full_cov)
     n_eff = compute_N_eff(D, log)

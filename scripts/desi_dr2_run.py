@@ -51,6 +51,7 @@ if "rascalc_cov" in extra:
     off = extra["rascalc_cov"]
     print("official RascalC covariance", off.shape, "projs", extra.get("rascalc_projs"))
     if off.shape == cov_ls.shape:
+        print("shot-noise rescaling in the official file (attrs):", {k: v for k, v in extra.items() if k.startswith("rascalc_attr")})
         print("diagonal ratio RascalJax / official (ell=0):", np.diag(cov_ls)[:n_s] / np.diag(off)[:n_s])
         print("diagonal ratio RascalJax / official (ell=2):", np.diag(cov_ls)[n_s:2 * n_s] / np.diag(off)[n_s:2 * n_s])
         print("diagonal ratio RascalJax / official (ell=4):", np.diag(cov_ls)[2 * n_s:] / np.diag(off)[2 * n_s:])
@@ -63,21 +64,37 @@ if os.path.exists(mock_fn):
     mock = m["cov_ell_s"]
     n_mock = int(m["n_mocks"])
     print(f"mock covariance from {n_mock} GLAM mocks", mock.shape)
-    if mock.shape == cov_ls.shape:
-        hartlap = (n_mock - len(mock) - 2) / (n_mock - 1)
-        print("diagonal ratio RascalJax / mocks (ell=0):", np.diag(cov_ls)[:n_s] / np.diag(mock)[:n_s])
-        print("diagonal ratio RascalJax / mocks (ell=2):", np.diag(cov_ls)[n_s:2 * n_s] / np.diag(mock)[n_s:2 * n_s])
-        compare_covariances(cov_ls, mock, label="RascalJax (inverted) vs mocks: ")
-        if "rascalc_cov" in extra and extra["rascalc_cov"].shape == mock.shape:
-            compare_covariances(extra["rascalc_cov"], mock, label="official RascalC (inverted) vs mocks: ")
-        keep = np.concatenate([np.arange(n_s), n_s + np.arange(n_s)])
-        compare_covariances(cov_ls[keep[:, None], keep[None, :]], mock[keep[:, None], keep[None, :]], label="RascalJax vs mocks (ell 0,2): ")
-        # chi2 of mock xi around the mock mean with the RascalJax precision
-        xis = m["xi_samples"]  # (n_mock, n_s, n_mu) in (s, mu)
-        P = b.projection_matrix()
-        v = xis.reshape(n_mock, -1) @ P  # (n_mock, n_out) in (s, ell) order
-        dv = v - v.mean(axis=0)
-        prec = np.linalg.inv(cov)
-        chi2 = np.einsum("ia,ab,ib->i", dv, prec, dv)
-        print(f"mean reduced chi2 of mocks with the RascalJax covariance: {chi2.mean() / cov.shape[0] * n_mock / (n_mock - 1):.3f} (expect 1)")
-        np.savez(os.path.join(out_dir, "comparison.npz"), cov_s_ell=cov, cov_ell_s=cov_ls, mock=mock, official=extra.get("rascalc_cov"))
+    n_s_mock = (len(m["s_edges"]) - 1)
+    if n_s_mock < n_s and np.allclose(m["s_edges"], b.s_edges[: n_s_mock + 1]):
+        # mocks measured to a smaller s_max: restrict the RascalJax (and official) covariance to the common bins
+        keep_m = np.concatenate([l * n_s + np.arange(n_s_mock) for l in range(n_ell)])
+        cov_ls = cov_ls[keep_m[:, None], keep_m[None, :]]
+        cov = cov[(np.arange(n_s_mock)[:, None] * n_ell + np.arange(n_ell)[None, :]).ravel()[:, None], (np.arange(n_s_mock)[:, None] * n_ell + np.arange(n_ell)[None, :]).ravel()[None, :]]
+        if "rascalc_cov" in extra:
+            extra["rascalc_cov"] = extra["rascalc_cov"][keep_m[:, None], keep_m[None, :]]
+        n_s = n_s_mock
+        b = rj.Binning(m["s_edges"], b.n_mu, b.max_l)
+        print(f"restricted to the mocks' {n_s} separation bins (s < {m['s_edges'][-1]:g})")
+    n_sm = len(mock) // n_ell  # mocks may cover fewer separation bins (measured to s = 180)
+    keep = np.concatenate([l * n_s + np.arange(n_sm) for l in range(n_ell)])
+    c = cov_ls[keep[:, None], keep[None, :]]
+    print("diagonal ratio RascalJax / mocks (ell=0):", np.diag(c)[:n_sm] / np.diag(mock)[:n_sm])
+    print("diagonal ratio RascalJax / mocks (ell=2):", np.diag(c)[n_sm:2 * n_sm] / np.diag(mock)[n_sm:2 * n_sm])
+    compare_covariances(c, mock, label="RascalJax (inverted) vs mocks (ell 0,2,4): ")
+    if "rascalc_cov" in extra:
+        compare_covariances(extra["rascalc_cov"][keep[:, None], keep[None, :]], mock, label="official RascalC (inverted) vs mocks (ell 0,2,4): ")
+    keep02 = np.concatenate([np.arange(n_sm), n_sm + np.arange(n_sm)])
+    compare_covariances(c[keep02[:, None], keep02[None, :]], mock[keep02[:, None], keep02[None, :]], label="RascalJax (inverted) vs mocks (ell 0,2): ")
+    if "rascalc_cov" in extra:
+        o = extra["rascalc_cov"][keep[:, None], keep[None, :]]
+        compare_covariances(o[keep02[:, None], keep02[None, :]], mock[keep02[:, None], keep02[None, :]], label="official RascalC (inverted) vs mocks (ell 0,2): ")
+    # chi2 of mock xi around the mock mean with the RascalJax precision (ell 0, 2 and 4, s up to the mocks' range)
+    xis = m["xi_samples"]  # (n_mock, n_sm, n_mu) in (s, mu)
+    bm = rj.Binning(m["s_edges"], int(m["n_mu"]), max_l)
+    v = xis.reshape(n_mock, -1) @ bm.projection_matrix()  # (n_mock, n_out) in (s, ell) order
+    dv = v - v.mean(axis=0)
+    keep_se = np.concatenate([i * n_ell + np.arange(n_ell) for i in range(n_sm)])
+    prec = np.linalg.inv(cov[keep_se[:, None], keep_se[None, :]])
+    chi2 = np.einsum("ia,ab,ib->i", dv, prec, dv)
+    print(f"mean reduced chi2 of mocks with the RascalJax covariance: {chi2.mean() / len(keep_se) * n_mock / (n_mock - 1):.3f} (expect 1)")
+    np.savez(os.path.join(out_dir, "comparison.npz"), cov_s_ell=cov, cov_ell_s=cov_ls, mock=mock, official=extra.get("rascalc_cov"))

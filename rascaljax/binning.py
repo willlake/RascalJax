@@ -134,7 +134,7 @@ class Binning:
     def project_matrix(self, cov_smu: Array) -> Array:
         """Project a covariance in flat (s, mu) bins (last two axes) to the output bins."""
         P = self.projection_matrix()
-        return np.einsum("...ab,ap,bq->...pq", cov_smu, P, P)
+        return np.swapaxes(np.swapaxes(cov_smu @ P, -1, -2) @ P, -1, -2)  # P^T C P, batched over leading axes
 
     def project_vector(self, v_smu: Array) -> Array:
         """Project a vector (last axis) in flat (s, mu) bins to the output bins."""

@@ -158,3 +158,23 @@ def test_jackknife_run_smoke():
     assert np.all(np.isfinite(raw.c4j)) and np.any(raw.c4j != 0) and np.any(raw.ee != 0)
     res = rj.post_process(raw, log=lambda s: None)
     assert np.isfinite(res["shot_noise_rescaling"]).all() and res["jackknife_theory_covariance"].shape == (4, 4)
+
+
+def test_combine_regions_limits():
+    from rascaljax.postprocess import combine_regions
+
+    b = rj.Binning(np.array([20.0, 30, 40, 50]), 100, 2)
+    rng = np.random.default_rng(1)
+    A = rng.normal(size=(6, 6)); C1 = A @ A.T
+    A = rng.normal(size=(6, 6)); C2 = A @ A.T
+    w = np.ones(b.n_bins)
+    # equal weights: average of the estimators -> (C1 + C2) / 4 up to the mu-binning projection error
+    comb = combine_regions([C1, C2], [w, w], b)
+    assert np.allclose(comb, (C1 + C2) / 4, rtol=0, atol=1e-3 * np.abs(C1 + C2).max())
+    # one region dominates
+    comb = combine_regions([C1, C2], [w, 1e-9 * w], b)
+    assert np.allclose(comb, C1, rtol=0, atol=1e-3 * np.abs(C1).max())
+    # s_mu output: exact
+    bs = rj.Binning(np.array([20.0, 30, 40]), 3, None)
+    A = rng.normal(size=(6, 6)); C = A @ A.T
+    assert np.allclose(combine_regions([C, C], [np.ones(6), 3 * np.ones(6)], bs), C * (0.25**2 + 0.75**2))

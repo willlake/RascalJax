@@ -91,7 +91,11 @@ class CovarianceTerms:
     ``total(alphas) = c4 + sum_cat alpha_cat c3[cat] + sum_(a,b) alpha_a alpha_b c2[(a,b)]``.
     """
 
-    def __init__(self, raw: RawCovariance, jack: bool = False, skip_s_bins=0, skip_l: int = 0, disconnected: bool = True):
+    def __init__(self, raw: RawCovariance | None, jack: bool = False, skip_s_bins=0, skip_l: int = 0, disconnected: bool = True, *, _arrays=None):
+        if _arrays is not None:  # internal: build from (c2, c3, c4, n_cat, cat_pairs)
+            self.c2, self.c3, self.c4, self.n_cat, self.cat_pairs = _arrays
+            self.raw = None
+            return
         self.raw = raw
         self.binning = raw.binning
         self.n_corr = raw.n_corr
@@ -109,6 +113,11 @@ class CovarianceTerms:
         self.c4 = _filter(_joint(c4), self.keep)  # (n_sub, N, N)
         self.c3 = _filter(_joint(c3), self.keep)  # (n_cat, n_sub, N, N)
         self.c2 = _filter(_joint(c2), self.keep)  # (n_catpair, n_sub, N, N)
+
+    def subset(self, idx: Array) -> "CovarianceTerms":
+        """Terms restricted to the given joint-bin indices."""
+        return CovarianceTerms(None, _arrays=(self.c2[:, :, idx[:, None], idx[None, :]], self.c3[:, :, idx[:, None], idx[None, :]],
+                                              self.c4[:, idx[:, None], idx[None, :]], self.n_cat, self.cat_pairs))
 
     @property
     def n_sub(self) -> int:
@@ -235,38 +244,17 @@ def fit_shot_noise_rescaling(terms: CovarianceTerms, target: Array, method: str 
             log(f"Catalog {ic}: no auto-correlation, keeping alpha = 1")
             continue
         idx = np.concatenate([np.arange(k * n, (k + 1) * n) for k in sel])
-
-        class _Sub:
-            n_cat = terms.n_cat
-            cat_pairs = terms.cat_pairs
-            c4 = terms.c4[:, idx[:, None], idx[None, :]]
-            c3 = terms.c3[:, :, idx[:, None], idx[None, :]]
-            c2 = terms.c2[:, :, idx[:, None], idx[None, :]]
-            total = terms.total.__func__
-
-        sub = _Sub()
+        sub = terms.subset(idx)
         tgt = target[idx[:, None], idx[None, :]]
 
         def f(a, ic=ic, sub=sub, tgt=tgt):
             al = np.ones(n_cat)
             al[ic] = a[0]
-            return neg_log_likelihood_with(al, sub, tgt)
+            return neg_log_likelihood(al, sub, tgt)
 
         best[ic] = fmin(f, np.ones(1), disp=False)[0]
         log(f"Catalog {ic} ({raw.catalog_names[ic]}): shot-noise rescaling {best[ic]:.6f}")
     return best
-
-
-def neg_log_likelihood_with(alphas, terms, target):
-    if np.any(alphas < 0):
-        return np.inf
-    full = terms.total(alphas)
-    partial = terms.total(alphas, subsamples=True)
-    _, psi = compute_D_precision_matrix(partial, full)
-    sign, logdet = np.linalg.slogdet(psi)
-    if sign < 0:
-        return np.inf
-    return float(np.trace(psi @ target) - logdet)
 
 
 # ----------------------------------------------------------------------------------------------

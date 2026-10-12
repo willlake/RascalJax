@@ -1,0 +1,144 @@
+import os
+
+os.environ.setdefault("JAX_PLATFORMS", "cpu")
+import numpy as np
+import pytest
+
+import rascaljax as rj
+from rascaljax.binning import mu_bin_legendre_factors
+from rascaljax.kernels import OffsetSampler, r2_cell_probabilities, xi_cell_probabilities
+
+
+def test_legendre_factors():
+    f = mu_bin_legendre_factors(np.linspace(0, 1, 10), 4)
+    assert f.shape == (9, 3)
+    assert np.isclose(f[:, 0].sum(), 1.0)
+    assert np.isclose(f[:, 1].sum(), 0.0, atol=1e-12)
+    assert np.isclose(f[:, 2].sum(), 0.0, atol=1e-12)
+    # a function xi(mu) = P_2(mu) projects to xi_2 = 1 (up to binning) and xi_0 = 0
+    mu_mid = np.linspace(0, 1, 10)
+    mu_mid = 0.5 * (mu_mid[1:] + mu_mid[:-1])
+    p2 = 0.5 * (3 * mu_mid**2 - 1)
+    proj = p2 @ f
+    assert abs(proj[1] - 1) < 0.02 and abs(proj[0]) < 0.02
+
+
+def test_binning_projection_and_filter():
+    b = rj.Binning(np.array([20.0, 30, 40]), 5, max_l=2)
+    P = b.projection_matrix()
+    assert P.shape == (10, 4)
+    v = np.ones(10)
+    out = b.project_vector(v)
+    assert np.allclose(out[0::2], 1.0) and np.allclose(out[1::2], 0.0, atol=1e-12)
+    assert list(b.output_filter(skip_s_bins=1)) == [2, 3]
+    assert list(b.output_filter(skip_l=1)) == [0, 2]
+    assert b.flat_bin(np.array([25.0, 35.0, 45.0]), np.array([0.1, 1.0, 0.5])).tolist() == [0, 9, -1]
+
+
+def test_xi_table_rules():
+    s = np.arange(2.0, 100.0, 2.0)
+    mu = np.linspace(0.05, 0.95, 10)
+    xi = np.outer((s / 5) ** -1.5, 1 + 0.3 * mu)
+    t = rj.XiTable.from_model(s, mu, xi)
+    assert np.allclose(t(s[:, None], mu[None, :]), xi, rtol=1e-6)
+    # power-law tail beyond the table
+    assert np.isclose(t(200.0, 0.5), t(98.0, 0.5) * (200 / 98.0) ** -4, rtol=1e-6)
+    # constant below s_min / 2, continuous through the transition
+    assert np.isclose(t(0.5, 0.5), t(1.0, 0.5))
+    assert abs(t(1.9, 0.5) - t(2.0, 0.5)) < 0.1 * abs(t(2.0, 0.5))
+    # mu clamping
+    assert np.isclose(t(10.0, 1.0), t(10.0, 0.95))
+    lk = t.lookup(0.5, 51)
+    assert lk.table.shape == (int(np.ceil(98 / 0.5)) + 1, 51)
+
+
+def test_kernels():
+    cube = r2_cell_probabilities(3, 10.0)
+    assert cube.shape == (7, 7, 7) and np.all(cube > 0)
+    assert np.allclose(cube, cube[::-1]) and np.allclose(cube, cube.transpose(1, 0, 2))
+    s = OffsetSampler.from_cube(cube)
+    off = s.offsets_of(np.array([0, 3 * 49 + 3 * 7 + 3, 342]))
+    assert off.tolist() == [[-3, -3, -3], [0, 0, 0], [3, 3, 3]]
+    xi_cube = xi_cell_probabilities(3, 10.0, lambda r: np.where(r > 0, (np.maximum(r, 1) / 5.0) ** -1.5, 1.0))
+    assert np.all(xi_cube >= 0) and xi_cube[3, 3, 3] == xi_cube.max()
+
+
+def _box_setup(N=3000, L=400.0, seed=0):
+    rng = np.random.default_rng(seed)
+    cat = rj.Catalog(rng.uniform(0, L, size=(N, 3)), np.ones(N), n_data=N / 2, name="box")
+    s_tab = np.arange(1.0, 150.0, 2.0)
+    mu_tab = np.linspace(0.1, 0.9, 5)
+    table = rj.XiTable.from_model(s_tab, mu_tab, np.repeat(((s_tab / 8) ** -1.8 * np.exp(-((s_tab / 80) ** 2)))[:, None], 5, axis=1))
+    s_edges = np.array([20.0, 40.0, 60.0])
+    n_mu = 2
+    shell = 4 * np.pi / 3 * (s_edges[1:] ** 3 - s_edges[:-1] ** 3) / L**3
+    rr = np.repeat((shell / n_mu)[:, None], n_mu, axis=1) * (1 - 1 / N)
+    return cat, table, s_edges, rr, L
+
+
+def test_small_run_rr_and_shapes():
+    cat, table, s_edges, rr, L = _box_setup()
+    raw = rj.run_cov([rj.Sample(cat)], {(0, 0): rj.CorrelationInput(s_edges, rr, table)}, mode="legendre", max_l=2, N2=4, N3=3, N4=3,
+                     n_loops=2, loops_per_sample=1, boxsize=L, xi_cut=100.0, refine_iterations=0, quads_per_batch=50_000, seed=1, log=lambda s: None)
+    assert raw.c4.shape == (2, 1, 1, 4, 4) and raw.c3.shape == (1, 2, 1, 1, 4, 4) and raw.c2.shape == (1, 2, 1, 1, 4, 4)
+    est = raw.rr_estimate.mean(axis=0)[0]
+    assert np.allclose(est, rr.ravel(), rtol=0.15)
+    res = rj.post_process(raw, log=lambda s: None)
+    assert res["full_theory_covariance"].shape == (4, 4)
+    assert np.all(np.linalg.eigvalsh(res["full_theory_covariance"]) > 0)
+
+
+def test_identical_samples_match_single():
+    """Two identical samples on one catalog must give identical blocks for all correlation pairs."""
+    cat, table, s_edges, rr, L = _box_setup()
+    ci = rj.CorrelationInput(s_edges, rr, table)
+    kw = dict(mode="s_mu", N2=4, N3=3, N4=3, n_loops=2, loops_per_sample=1, boxsize=L, xi_cut=100.0, refine_iterations=0,
+              quads_per_batch=50_000, seed=1, log=lambda s: None)
+    raw1 = rj.run_cov([rj.Sample(cat, name="a")], {(0, 0): ci}, **kw)
+    raw2 = rj.run_cov([rj.Sample(cat, name="a"), rj.Sample(cat, name="b")], {(0, 0): ci, (0, 1): ci, (1, 1): ci}, **kw)
+    assert raw2.n_corr == 3
+    from rascaljax.utils import symmetrized
+    for i in range(3):
+        for j in range(3):
+            # off-diagonal blocks are not symmetrized by construction, diagonal ones are
+            assert np.allclose(symmetrized(raw2.c4[:, i, j]), raw1.c4[:, 0, 0])
+            assert np.allclose(symmetrized(raw2.c3[0, :, i, j]), raw1.c3[0, :, 0, 0])
+            assert np.allclose(symmetrized(raw2.c2[0, :, i, j]), raw1.c2[0, :, 0, 0])
+
+
+def test_disjoint_samples_vs_two_catalogs():
+    """Disjoint samples on one catalog vs the same particles as two catalogs: same expectation (here: same seed
+    draws differ, so only check structure and rough agreement of the diagonal)."""
+    cat, table, s_edges, rr, L = _box_setup(N=6000)
+    z = cat.positions[:, 2]
+    half = z < L / 2
+    ci = rj.CorrelationInput(s_edges, rr * 0.5, table)
+    kw = dict(mode="s_mu", N2=4, N3=3, N4=3, n_loops=2, loops_per_sample=1, boxsize=L, xi_cut=100.0, refine_iterations=0,
+              quads_per_batch=50_000, seed=1, log=lambda s: None)
+    sA, sB = rj.Sample(cat, half, "A"), rj.Sample(cat, ~half, "B")
+    raw = rj.run_cov([sA, sB], {(0, 0): ci, (0, 1): ci, (1, 1): ci}, **kw)
+    # the cross-correlation of disjoint z-halves has no 2-point (shot noise) term with the auto-correlations
+    assert np.allclose(raw.c2[:, :, 0, 1], 0) and np.allclose(raw.c2[:, :, 1, 2], 0)
+    assert not np.allclose(raw.c2[:, :, 0, 0], 0)
+    catA = cat.subset(half)
+    catB = cat.subset(~half)
+    catA.n_data = catB.n_data = cat.n_data / 2
+    raw2 = rj.run_cov([rj.Sample(catA, name="A"), rj.Sample(catB, name="B")], {(0, 0): ci, (0, 1): ci, (1, 1): ci}, **kw)
+    assert len(raw2.catalog_names) == 2 and raw2.c2.shape[0] == 3
+    assert np.allclose(raw2.c2[:, :, 0, 1], 0) and np.allclose(raw2.c2[:, :, 1, 2], 0)
+    # the per-catalog-pair c2 axis: (0,0) block from pair (0,0), (1,1) block from pair (1,1)
+    assert np.allclose(raw2.c2[0, :, 1, 1], 0) and not np.allclose(raw2.c2[0, :, 0, 0], 0)
+
+
+def test_alias_sampler_statistics():
+    from rascaljax.kernels import OffsetSampler, r2_cell_probabilities
+
+    s = OffsetSampler.from_cube(r2_cell_probabilities(4, 10.0))
+    assert np.isclose(s.prob.sum(), 1.0)
+    rng = np.random.default_rng(0)
+    n = 4_000_000
+    h = np.bincount(s.draw(rng, n), minlength=len(s.prob))
+    expected = s.prob * n
+    sel = expected > 50
+    pulls = (h[sel] - expected[sel]) / np.sqrt(expected[sel])
+    assert abs(pulls.mean()) < 0.2 and 0.8 < pulls.std() < 1.25

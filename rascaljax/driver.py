@@ -339,6 +339,7 @@ def run_cov(samples: list[Sample], correlations: dict[tuple[int, int], Correlati
             refine_iterations: int = 10, refine_draws: int = 20,
             quads_per_batch: int = 2_000_000, seed: int = 0,
             xi_lookup_ds: float = 0.25, xi_lookup_n_mu: int = 201,
+            devices: list | None = None,
             out_dir: str | None = None, log=None) -> RawCovariance:
     """Compute the raw covariance matrix terms.
 
@@ -360,11 +361,14 @@ def run_cov(samples: list[Sample], correlations: dict[tuple[int, int], Correlati
     refine_iterations, refine_draws : xi table refinement (RascalC's rescaling), draws per primary per iteration.
     quads_per_batch : controls the batch size (device memory).
     seed : RNG seed (results are reproducible with the same inputs, seed and batch size).
+    devices : JAX devices to use (default: all available); subsamples are distributed over them.
     out_dir : if given, the raw covariance is saved there as ``Raw_Covariance.npz`` with a log file.
     """
     t_start = time.time()
     if log is None:
         log = Logger(None if out_dir is None else os.path.join(out_dir, "log.txt"))
+    devices = list(jax.devices()) if devices is None else list(devices)
+    n_dev = len(devices)
     if mode not in ("legendre", "s_mu"):
         raise ValueError("mode must be 'legendre' or 's_mu'")
     if n_loops % loops_per_sample:
@@ -399,6 +403,7 @@ def run_cov(samples: list[Sample], correlations: dict[tuple[int, int], Correlati
     log(f"RascalJax: {len(samples)} sample(s) on {len(catalogs)} catalog(s), {n_corr} correlation(s), mode={mode}"
         + (f", max_l={max_l}" if mode == "legendre" else "") + f", jackknife={jackknife}, periodic={bool(boxsize)}")
     log(f"Binning: {binning.n_s} s bins from {binning.s_min:g} to {binning.s_max:g}, {n_mu} mu bins; N2={N2}, N3={N3}, N4={N4}, n_loops={n_loops}, loops_per_sample={loops_per_sample}")
+    log(f"Devices: {n_dev} ({devices[0].platform})")
 
     # ----- jackknife labels -----
     jack_labels = None
@@ -520,19 +525,27 @@ def run_cov(samples: list[Sample], correlations: dict[tuple[int, int], Correlati
         batch = max(1, min(n_prim, quads_per_batch // per_prim))
         log(f"Pass {ip + 1}/{len(passes)}: legs={p.legs}, {n_prim} primaries, batch {batch} ({per_prim} draws per primary), {n_loops} loops")
         key_pass = jax.random.fold_in(key0, ip)
-        subsamples = []
-        acc = zero_accumulators(st)
+        # subsamples are distributed round-robin over the devices; batches are dispatched asynchronously so all
+        # devices work concurrently; results come back to the host once a round of subsamples is complete
+        data_dev = [jax.device_put(data, dev) for dev in devices]
+        subsamples = [None] * n_sub
         t0 = time.time()
-        for loop in range(n_loops):
-            key_loop = jax.random.fold_in(key_pass, loop)
-            for ib, start in enumerate(range(0, n_prim, batch)):
-                idx = jnp.arange(start, min(start + batch, n_prim))
-                acc = accumulate_batch_jit(jax.random.fold_in(key_loop, ib), idx, data, st, acc)
-            if (loop + 1) % loops_per_sample == 0:
-                subsamples.append(_normalize(accumulators_to_numpy(acc), p, gpr, n_prim))
-                acc = zero_accumulators(st)
-                el = time.time() - t0
-                log(f"  loop {loop + 1}/{n_loops} done ({el:.1f} s elapsed, ~{el / (loop + 1) * (n_loops - loop - 1):.1f} s left)")
+        for round_start in range(0, n_sub, n_dev):
+            active = list(range(round_start, min(round_start + n_dev, n_sub)))
+            accs = {s: jax.device_put(zero_accumulators(st), devices[s - round_start]) for s in active}
+            for il in range(loops_per_sample):
+                for ib, start in enumerate(range(0, n_prim, batch)):
+                    for s in active:
+                        dev_i = s - round_start
+                        loop = s * loops_per_sample + il
+                        key_loop = jax.random.fold_in(key_pass, loop)
+                        idx = jax.device_put(jnp.arange(start, min(start + batch, n_prim)), devices[dev_i])
+                        accs[s] = accumulate_batch_jit(jax.device_put(jax.random.fold_in(key_loop, ib), devices[dev_i]), idx, data_dev[dev_i], st, accs[s])
+            for s in active:
+                subsamples[s] = _normalize(accumulators_to_numpy(accs[s]), p, gpr, n_prim)
+            done = (active[-1] + 1) * loops_per_sample
+            el = time.time() - t0
+            log(f"  loop {done}/{n_loops} done ({el:.1f} s elapsed, ~{el / done * (n_loops - done):.1f} s left)")
         el = time.time() - t0
         n_q = n_prim * n_loops * per_prim
         log(f"  pass done in {el:.1f} s: {n_q:.3e} draws, {n_q / el:.3e} draws/s")

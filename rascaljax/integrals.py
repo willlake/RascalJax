@@ -206,8 +206,7 @@ def separation(p1, p2, boxsize, periodic: bool):
 
 def flat_bin(r, mu, s_edges, n_s: int, n_mu: int):
     """Flat (s, mu) bin index, or -1 outside the separation range."""
-    # number of edges <= r (edges are few: compare against all of them instead of a binary search)
-    i_s = jnp.sum(r[..., None] >= s_edges, axis=-1) - 1
+    i_s = jnp.searchsorted(s_edges, r, side="right") - 1
     ok = (i_s >= 0) & (i_s < n_s)
     i_mu = jnp.clip(jnp.floor(mu * n_mu).astype(jnp.int64), 0, n_mu - 1)
     return jnp.where(ok, i_s * n_mu + i_mu, -1)
@@ -522,7 +521,7 @@ def binned_xi_batch(key, primary_idx, grid_i: GridArrays, grid_j: GridArrays, n_
     p_j = p_off * inv_n_j
     pos_j = grid_j.positions[idx_j]
     r, mu = separation(pos_i[:, None, :], pos_j, boxsize, rs.periodic)
-    i_s = jnp.sum(r[..., None] >= s_edges, axis=-1) - 1
+    i_s = jnp.searchsorted(s_edges, r, side="right") - 1
     ok = ok_j & (i_s >= 0) & (i_s < rs.n_s)
     if rs.same_catalog:
         ok &= idx_j != primary_idx[:, None]

@@ -401,9 +401,12 @@ def combine_regions(covs: list[Array], rr_weights: list[Array], binning: Binning
         for c in range(n_corr):
             wc = wn[c].reshape(binning.n_s, binning.n_mu)
             if binning.legendre:
-                # d xi_ell'(s) / d xi_ell(s) of region r: sum_mu G[ell, mu] w[s, mu] F[mu, ell']
-                blk = np.einsum("il,sl,lj->sisj", G, wc, F)  # (s, ell_in, s, ell_out) with s diagonal
-                pd[c, :, c, :] = np.einsum("sisj,st->sitj", blk, np.eye(binning.n_s)).reshape(n_out, n_out)
+                # d xi_ell'(s) / d xi_ell(s) of region r: sum_mu G[ell, mu] w[s, mu] F[mu, ell'] (diagonal in s)
+                blk = np.einsum("il,sl,lj->sij", G, wc, F)  # (s, ell_in, ell_out)
+                full = np.zeros((binning.n_s, binning.n_ell, binning.n_s, binning.n_ell))
+                for i_s in range(binning.n_s):
+                    full[i_s, :, i_s, :] = blk[i_s]
+                pd[c, :, c, :] = full.reshape(n_out, n_out)
             else:
                 pd[c, :, c, :] = np.diag(wc.ravel())
         pd = pd.reshape(n_corr * n_out, n_corr * n_out)

@@ -142,3 +142,19 @@ def test_alias_sampler_statistics():
     sel = expected > 50
     pulls = (h[sel] - expected[sel]) / np.sqrt(expected[sel])
     assert abs(pulls.mean()) < 0.2 and 0.8 < pulls.std() < 1.25
+
+
+def test_jackknife_run_smoke():
+    cat, table, s_edges, rr, L = _box_setup(N=4000)
+    rng = np.random.default_rng(3)
+    cat.jackknife = rng.integers(0, 5, size=cat.size)
+    frac = rng.dirichlet(np.ones(5))
+    rr_jack = rr.ravel()[None, :] * frac[:, None]
+    xi_jack = rng.normal(0, 0.01, size=rr_jack.shape)
+    ci = rj.CorrelationInput(s_edges, rr, table, jack_xi=xi_jack, jack_rr=rr_jack, jack_labels=np.arange(5))
+    raw = rj.run_cov([rj.Sample(cat)], {(0, 0): ci}, mode="legendre", max_l=2, N2=4, N3=3, N4=3, n_loops=4, loops_per_sample=1,
+                     boxsize=L, xi_cut=100.0, refine_iterations=0, quads_per_batch=50_000, seed=1, log=lambda s: None)
+    assert raw.jackknife and raw.c4j.shape == raw.c4.shape and raw.ee.shape == (4, 1, 2, 5, 4)
+    assert np.all(np.isfinite(raw.c4j)) and np.any(raw.c4j != 0) and np.any(raw.ee != 0)
+    res = rj.post_process(raw, log=lambda s: None)
+    assert np.isfinite(res["shot_noise_rescaling"]).all() and res["jackknife_theory_covariance"].shape == (4, 4)

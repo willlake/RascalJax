@@ -118,7 +118,7 @@ compare("c2j", raw.c2j[0, :, 0, 0], cppj["c2"], cppj["c2_full"])
 compare("c3j", raw.c3j[0, :, 0, 0], cppj["c3"], cppj["c3_full"])
 compare("c4j", raw.c4j[:, 0, 0], cppj["c4"], cppj["c4_full"])
 if mode == "s_mu":
-    compare("RR", raw.rr_estimate[:, 0], cpp["RR"] if "RR" in cpp else raw.rr_estimate[:, 0], cpp["RR_full"])
+    print("RR estimate / input:", raw.rr_estimate.mean(axis=0)[0] / rr.ravel())
     for key, mine in (("EE1", raw.ee[:, 0, 0]), ("EE2", raw.ee[:, 0, 1]), ("RR1", raw.rrj[:, 0, 0]), ("RR2", raw.rrj[:, 0, 1])):
         theirs = cppj[key + "_full"]
         m = mine.mean(axis=0)

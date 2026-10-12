@@ -95,7 +95,7 @@ def read_rascalc_outputs(out_dir: str, binning: Binning, jack: bool = False) -> 
         out[key] = np.array(mats)
         full = np.loadtxt(os.path.join(d, prefix + "full.txt"))
         out[key + "_full"] = np.diag(full) if full.ndim == 1 else full
-    if not binning.legendre:
+    if not binning.legendre and not jack:
         out["RR_full"] = np.loadtxt(os.path.join(d, f"RR_{tag}_11_full.txt"))
     if jack and not binning.legendre:
         for key in ("EE1", "EE2", "RR1", "RR2"):

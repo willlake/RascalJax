@@ -234,9 +234,10 @@ def jackknife_weight_tensor(w, ji, jj, jk, jl, bin_a, bin_b, corr_a: int, corr_b
     ``1/4 [d_ik + d_jk + d_il + d_jl] - 1/2 [w^b_{b,Ji} + w^b_{b,Jj} + w^a_{a,Jk} + w^a_{a,Jl}] + sum_A w^a_{aA} w^b_{bA}``,
     divided by ``1 - sum_A w^a_{aA} w^b_{bA}``.
     """
+    wa, wb = w[corr_a], w[corr_b]  # (n_jack, n_bins)
     first = (ji == jk).astype(jnp.float64) + (jj == jk) + (ji == jl) + (jj == jl)
-    second = w[corr_b, ji, bin_b] + w[corr_b, jj, bin_b] + w[corr_a, jk, bin_a] + w[corr_a, jl, bin_a]
-    prod = jnp.sum(w[corr_a, :, bin_a] * w[corr_b, :, bin_b], axis=0)
+    second = wb[ji, bin_b] + wb[jj, bin_b] + wa[jk, bin_a] + wa[jl, bin_a]
+    prod = jnp.sum(wa[:, bin_a] * wb[:, bin_b], axis=0)  # (n_contrib,)
     return (0.25 * first - 0.5 * second + prod) / (1.0 - prod)
 
 

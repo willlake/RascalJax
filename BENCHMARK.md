@@ -73,25 +73,46 @@ drawing from all particles; RascalJax uses the actual draw probability.
 Inputs: official desipipe pycorr counts (`allcounts_LRG_{NGC,SGC}_z0.4-0.6_default_FKP_lin_nran8_njack60_split20`),
 covariance bins 20-200 Mpc/h in 4 Mpc/h steps, 100 mu bins after wrapping, multipoles 0, 2, 4; xi table from the
 same counts rebinned to 2 Mpc/h x 10 mu bins; one random file per cap cut to the redshift bin (NGC: 3.9e6 randoms
-for 686k galaxies); 60 angular K-means jackknife regions fitted on the cap's data as in desipipe; N2, N3, N4 =
-5, 10, 20. Reference: the official RascalC covariance (`cov_2pt/rascalc/v1.1`) and the sample covariance of 1007
-GLAM-Uchuu altmtl mocks (measured to s = 180, so compared on the first 40 bins).
+for 686k galaxies; SGC: 2.0e6); 60 angular K-means jackknife regions fitted on the cap's data as in desipipe;
+N2, N3, N4 = 5, 10, 20. References: the official RascalC covariance (`cov_2pt/rascalc/v1.1`) and the sample
+covariance of 1007 GLAM-Uchuu altmtl mocks (measured to s = 180, so compared on the first 40 s bins).
+Metrics as in Rashkovetskyi et al. 2025: R_inv (RMS eigenvalue of C1^-1 C2 - 1) and reduced chi2 - 1, quoted
+as (C1 = first, C2 = second) and the reverse.
 
-NGC, 32 loops (1.25e11 quads, 6 minutes on 3 GPUs):
+### Estimator note
 
-* shot-noise rescaling from the jackknives: alpha = 1.006;
-* diagonal of the ell = 0 and ell = 2 blocks within 1-3% of the official RascalC covariance for s < 100 Mpc/h,
-  the correlation structure matches (e.g. row 10 of the ell=0 correlation matrix: RascalJax 0.30, 0.35, 0.41,
-  0.47, 0.54, 0.61, 0.70, 0.77, 0.86, 0.90, 1 vs official 0.29, 0.34, 0.40, 0.46, 0.53, 0.61, 0.69, 0.77, 0.85,
-  0.92, 1 vs mocks 0.32, 0.40, 0.46, 0.53, 0.59, 0.65, 0.73, 0.80, 0.86, 0.93, 1);
-* at s > 120 Mpc/h and in the ell = 4 block the 32-loop estimate is noisy (20-30% low on the diagonal) and the
-  full matrix is not yet positive definite, so inverse-based metrics are not meaningful at this length.
-* RascalJax and the official RascalC agree with each other better than either agrees with the mocks on the ell = 2
-  diagonal below 50 Mpc/h (mocks 10-40% higher), as expected for the Gaussian + shot-noise model.
+The first version of the 4-point kernel accumulated both Wick contractions per quad, xi(ik) xi(jl) + xi(il) xi(jk).
+The second contraction uses draws that are not kernel-matched (l is drawn around j, not i) and is heavy-tailed: on
+DESI geometry it dominated the variance at large s, the covariance was not positive definite even after 256 loops
+(1e12 quads, N_eff = 550) and the jackknife fit failed. The kernel now accumulates only xi(ik) xi(jl), and the
+other contraction comes from the term with the first pair's samples swapped (RascalC's strategy, generalized to
+any samples). Both versions are unbiased against the exact sums (section 1).
 
-Converged runs (256 loops per cap, about 1e12 quads each) are in progress; this section will be updated with the
-positive-definiteness, R_inv / reduced chi2 against the official covariance and the mocks, and the NGC+SGC
-combination (`scripts/desi_dr2_combine.py`).
+### SGC, 32 loops (6.4e10 quads, 4 minutes on 2 A100s), kernel-matched estimator
+
+| quantity | value |
+|---|---|
+| shot-noise rescaling (jackknife fit) | 1.017 |
+| positive definite | yes |
+| N_eff | 6352 |
+| convergence check (halves of the subsamples) R_inv | 0.54 - 0.62 |
+| official RascalC vs RascalJax, ell = 0, 2, 4: R_inv / chi2_red - 1 | 0.21, 0.22 / 0.016, 0.028 |
+| official RascalC vs RascalJax, ell = 0, 2: R_inv / chi2_red - 1 | 0.17, 0.17 / 0.020, 0.008 |
+| RascalJax vs 1007 GLAM mocks, ell = 0, 2, 4: R_inv / chi2_red - 1 | 0.41, 0.51 / 0.009, 0.17 |
+| official RascalC vs the same mocks, ell = 0, 2, 4 | 0.35, 0.45 / -0.007, 0.15 |
+| RascalJax vs mocks, ell = 0, 2 | 0.33, 0.40 / -0.014, 0.13 |
+| official RascalC vs mocks, ell = 0, 2 | 0.29, 0.36 / -0.014, 0.11 |
+| mean reduced chi2 of the mock xi (0, 2, 4) with the RascalJax precision matrix | 1.009 |
+
+The diagonal agrees with the official covariance to 2-4% in all three multipoles below 100 Mpc/h (RascalJax
+slightly lower) and within the noise above. Against the mocks both codes show the same pattern: the ell = 2
+variance of the mocks is 10-35% larger below 50 Mpc/h (nonlinear RSD beyond the Gaussian + shot-noise model) and
+the ell = 0 variance 5-20% smaller than the analytic ones between 80 and 180 Mpc/h.
+
+### Converged runs
+
+256-loop runs per cap (NGC 1e12 quads, SGC 5e11) with the kernel-matched estimator are in progress; this section
+will be completed with their numbers and the NGC+SGC combination (`scripts/desi_dr2_combine.py`).
 
 ## 6. Performance
 

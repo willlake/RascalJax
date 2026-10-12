@@ -15,10 +15,10 @@ import rascaljax as rj
 from rascaljax.io_pycorr import load_correlation_input
 from rascaljax.postprocess import compare_covariances
 
+args = [a for a in sys.argv[1:] if not a.startswith("--")]
 d = args[0]
 n_loops = int(args[1]) if len(args) > 1 else 32
 loops_per_sample = int(args[2]) if len(args) > 2 else 2
-args = [a for a in sys.argv[1:] if not a.startswith("--")]
 max_randoms = int(args[3]) if len(args) > 3 and args[3] != "None" else None
 skip_run = "--skip-run" in sys.argv
 out_dir = os.path.join(d, "rascaljax")

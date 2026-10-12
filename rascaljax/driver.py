@@ -328,7 +328,8 @@ def refine_xi_table(table: XiTable, grid_i: GridArrays, grid_j: GridArrays, same
             ratio = np.where(est != 0, target / est, 1.0)
         new_xi = old * ratio
         current = XiTable(s_c, mu_c, new_xi, table.s_edges)
-        log(f"  refinement iteration {it + 1}/{n_iter}: max |est/target - 1| = {np.max(np.abs(est / target - 1)[target != 0]):.3e}, min pairs per bin = {int(cs.min())}")
+        scale = np.max(np.abs(target))
+        log(f"  refinement iteration {it + 1}/{n_iter}: max |est - target| / max |target| = {np.max(np.abs(est - target)) / scale:.3e}, min pairs per bin = {int(cs.min())}")
     return current
 
 

@@ -33,6 +33,18 @@ def mu_bin_legendre_factors(mu_edges: Array, max_l: int) -> Array:
     return out
 
 
+def legendre_to_mu_bin_factors(mu_edges: Array, max_l: int) -> Array:
+    """Factors ``G[i_ell, i_mu] = int_{bin} P_ell(mu) dmu / dmu`` giving the bin-averaged multipole values, i.e.
+    the (approximate) inverse projection ``xi(s, mu_bin) = sum_ell G[ell, mu] xi_ell(s)``."""
+    ells = np.arange(0, max_l + 1, 2)
+    mu_edges = np.asarray(mu_edges, dtype=float)
+    out = np.zeros((len(ells), len(mu_edges) - 1))
+    for i, ell in enumerate(ells):
+        integ = np.polyint(legendre(ell))
+        out[i] = np.diff(integ(mu_edges)) / np.diff(mu_edges)
+    return out
+
+
 @dataclass(frozen=True)
 class Binning:
     """Binning of the covariance (and of the pair counts normalizing it)."""
@@ -102,6 +114,10 @@ class Binning:
     def legendre_factors(self) -> Array:
         """``(n_mu, n_ell)`` factors from mu bins to even multipoles."""
         return mu_bin_legendre_factors(self.mu_edges, self.max_l)
+
+    def inverse_legendre_factors(self) -> Array:
+        """``(n_ell, n_mu)`` bin-averaged multipole values (see :func:`legendre_to_mu_bin_factors`)."""
+        return legendre_to_mu_bin_factors(self.mu_edges, self.max_l)
 
     def projection_matrix(self) -> Array:
         """Matrix ``P`` of shape ``(n_bins, n_out)`` such that a vector in flat (s, mu) bins

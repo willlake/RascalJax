@@ -100,6 +100,9 @@ try:
 except Exception as e:  # noqa: BLE001
     print("Could not load the official RascalC covariance:", e)
 
-save_correlation_input(ci, os.path.join(out_dir, "inputs.npz"), positions=pos, weights=w_ran, labels=labels, n_data=n_data,
+from rascaljax.io_pycorr import _wrap  # noqa: E402
+
+rr_wcounts = np.asarray(_wrap(counts_cov).R1R2.wcounts, dtype=float)  # unnormalized, for the region combination weights
+save_correlation_input(ci, os.path.join(out_dir, "inputs.npz"), positions=pos, weights=w_ran, labels=labels, n_data=n_data, rr_wcounts=rr_wcounts,
                        data_labels=data_labels, data_weights=data["WEIGHT"] * data["WEIGHT_FKP"], **official)
 print(f"Saved {os.path.join(out_dir, 'inputs.npz')} in {time.time() - t0:.0f} s")

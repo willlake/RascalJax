@@ -374,3 +374,38 @@ def post_process(raw: RawCovariance, *, mock_cov: Array | None = None, alphas=No
         np.savez_compressed(out_file, **{k: v for k, v in out.items() if k != "convergence"})
         log(f"Saved post-processed results to {out_file}")
     return out
+
+
+# ----------------------------------------------------------------------------------------------
+# Combination of regions (e.g. NGC + SGC), Appendix B.2 of Rashkovetskyi et al. 2025
+# ----------------------------------------------------------------------------------------------
+def combine_regions(covs: list[Array], rr_weights: list[Array], binning: Binning, n_corr: int = 1) -> Array:
+    """Covariance of the correlation function(s) of the union of independent regions whose pair counts are summed.
+
+    ``covs[r]`` is the covariance of region ``r`` in the output bins (``(corr, s, ell)`` or ``(corr, s, mu)`` ordering),
+    ``rr_weights[r]`` the region's *unnormalized* RR counts in flat (s, mu) bins (shape ``(n_corr, n_bins)`` or
+    ``(n_bins,)``). The combined (s, mu)-binned estimator is the RR-weighted average of the regions', so the Legendre
+    covariance combines through the partial derivatives projected back and forth between mu bins and multipoles.
+    Correlations between regions are neglected.
+    """
+    n_bins, n_out = binning.n_bins, binning.n_out
+    weights = [np.asarray(w, dtype=float).reshape(n_corr, n_bins) for w in rr_weights]
+    total = np.sum(weights, axis=0)
+    out = np.zeros((n_corr * n_out, n_corr * n_out))
+    if binning.legendre:
+        G = binning.inverse_legendre_factors()  # (n_ell, n_mu)
+        F = binning.legendre_factors()  # (n_mu, n_ell)
+    for cov, w in zip(covs, weights):
+        wn = w / total  # (n_corr, n_bins)
+        pd = np.zeros((n_corr, n_out, n_corr, n_out))
+        for c in range(n_corr):
+            wc = wn[c].reshape(binning.n_s, binning.n_mu)
+            if binning.legendre:
+                # d xi_ell'(s) / d xi_ell(s) of region r: sum_mu G[ell, mu] w[s, mu] F[mu, ell']
+                blk = np.einsum("il,sl,lj->sisj", G, wc, F)  # (s, ell_in, s, ell_out) with s diagonal
+                pd[c, :, c, :] = np.einsum("sisj,st->sitj", blk, np.eye(binning.n_s)).reshape(n_out, n_out)
+            else:
+                pd[c, :, c, :] = np.diag(wc.ravel())
+        pd = pd.reshape(n_corr * n_out, n_corr * n_out)
+        out += pd.T @ cov @ pd
+    return out

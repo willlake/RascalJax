@@ -34,7 +34,13 @@ covariance blocks between the correlations AA, AB, BB agree with exact sums carr
 | BB x BB | 0.994 - 1.000 | 0.993 - 1.002 (1%) | 0.86 - 1.24 (4-18%) |
 
 (ranges over the diagonal elements; MC errors in parentheses; C4 at the largest separation is poorly sampled in
-this tiny box). The same particles treated as two disjoint catalogs are checked in the second part of the script.
+this tiny box).
+
+The same particles split into two disjoint z-slabs treated as two *catalogs* (two sampling passes planned by
+`plan_passes`): the auto blocks AA x AA, BB x BB and AB x AB agree with the exact sums (C2 within 0.5%, C3 within
+1-3%, C4 within MC errors of 3-9%); the C2 of the mixed blocks (AA x AB, AA x BB, AB x BB) is exactly zero in both,
+as it must be for disjoint catalogs; their C3 and C4 are small boundary contributions sampled with 10-50% errors
+and are consistent with the exact sums at that level.
 
 ## 3. Analytic Gaussian covariance (`scripts/gaussian_box.py`)
 

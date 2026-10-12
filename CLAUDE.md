@@ -26,8 +26,10 @@ Conventions that must stay consistent across modules:
   catalog ("galaxies per random") enters C3 once and C2 twice (`driver._normalize`).
 * All accumulated sums are per draw; `_normalize` divides by draws per primary (`n_draws / n_prim`), so the sums
   estimate sums over all primaries.
-* C4 accumulates both Wick terms; C3 is assembled from the shared-particle tensor `T[X,(Y,Y'),Z]` in four
-  sharing cases (`plan_passes`), so no symmetrization over separate integrals is needed. Diagonal blocks are
+* C4 accumulates only the kernel-matched Wick contraction xi(ik) xi(jl); the other contraction comes from the
+  term with the first pair's samples swapped (`plan_passes` adds both). Do not add xi(il) xi(jk) per quad: it is
+  unbiased but heavy-tailed and ruined the convergence of the DESI runs (N_eff 550 -> 6000 after the change).
+  C3 is assembled from the shared-particle tensor `T[X,(Y,Y'),Z]` in four sharing cases. Diagonal blocks are
   symmetrized at the end.
 * Jackknife weight tensor and its `1 - sum_A w_aA w_bA` normalization follow RascalC; the EE/RR disconnected
   arrays use the full-cell draw probability and `0.25 n_pairs` normalization (not RascalC's class-conditional one).

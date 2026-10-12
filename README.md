@@ -23,8 +23,8 @@ Differences from RascalC:
   shot-noise cross terms of their covariance come out of the same integrals. Samples on different catalogs
   (different tracers) are the RascalC multi-tracer case. Any number of samples and catalogs is supported.
 * **One accumulation kernel.** All terms are accumulated in `(s, mu)` bins and projected to multipoles on the
-  fly; both Wick terms of the 4-point integrand and all four particle-sharing cases of the 3-point term are
-  computed directly, so no symmetrization over separate integrals is needed.
+  fly; the pass planner enumerates the kernel-matched 4-point contractions and the four particle-sharing cases of
+  the 3-point term for any number of samples and catalogs.
 * **Pure Python**: no compilation; `numpy`/`scipy` for setup and post-processing, JAX for the kernels.
 
 Not (yet) implemented: the "accumulated" Legendre mode with survey-correction functions, the 3PCF, and

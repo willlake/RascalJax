@@ -178,7 +178,7 @@ def plan_passes(sample_catalog: Sequence[int], correlations: Sequence[tuple[int,
     each covariance block is assembled from them.
 
     Returns ``(passes, assembly)`` where ``assembly[(i_corr1, i_corr2)]`` is a dict with:
-    ``"c4": (i_pass, i_term)``, ``"c3": list of (i_pass, i_term, transpose, shared_catalog)``,
+    ``"c4": list of (i_pass, i_term)`` (summed), ``"c3": list of (i_pass, i_term, transpose, shared_catalog)``,
     ``"c2": (i_pass, i_term, catalog_pair) or None``.
     """
     cat = list(sample_catalog)
@@ -207,14 +207,19 @@ def plan_passes(sample_catalog: Sequence[int], correlations: Sequence[tuple[int,
 
     assembly = {}
     n_corr = len(correlations)
-    # 4-point passes first (they also serve the pair and triple terms)
+    # 4-point passes first (they also serve the pair and triple terms). Both Wick contractions of a block come
+    # from kernel-matched terms with the first pair in both orders: (A, B, C, D) gives xi_AC(ik) xi_BD(jl) and
+    # (B, A, C, D) gives xi_BC(ik) xi_AD(jl); for A == B the same term is simply counted twice.
     for i1 in range(n_corr):
         for i2 in range(i1, n_corr):
             A, B = correlations[i1]
             C, D = correlations[i2]
-            p = get_pass((cat[A], cat[B], cat[C], cat[D]), need_quads=True)
-            it = p.add_unique("c4_terms", (A, B, C, D, i1, i2))
-            assembly[(i1, i2)] = {"c4": (passes.index(p), it), "c3": [], "c2": None}
+            providers = []
+            for X, Y in ((A, B), (B, A)):
+                p = get_pass((cat[X], cat[Y], cat[C], cat[D]), need_quads=True)
+                it = p.add_unique("c4_terms", (X, Y, C, D, i1, i2))
+                providers.append((passes.index(p), it))
+            assembly[(i1, i2)] = {"c4": providers, "c3": [], "c2": None}
     # 3-point tensors T[X, (Y, Y'), Z] with cat(Y) == cat(Y')
     for i1 in range(n_corr):
         for i2 in range(i1, n_corr):
@@ -564,15 +569,17 @@ def run_cov(samples: list[Sample], correlations: dict[tuple[int, int], Correlati
     c3j = np.zeros((n_cat,) + shape) if jackknife else None
     c2j = np.zeros((len(cat_pairs),) + shape) if jackknife else None
     for (i1, i2), asm in assembly.items():
-        ip, it = asm["c4"]
-        for s in range(n_sub):
-            blk = pass_results[ip][s]["c4"][it]
-            c4[s, i1, i2] = blk
-            c4[s, i2, i1] = blk.T
-            if jackknife:
-                blkj = pass_results[ip][s]["c4j"][it]
-                c4j[s, i1, i2] = blkj
-                c4j[s, i2, i1] = blkj.T
+        for ip, it in asm["c4"]:
+            for s in range(n_sub):
+                blk = pass_results[ip][s]["c4"][it]
+                c4[s, i1, i2] += blk
+                if i1 != i2:
+                    c4[s, i2, i1] += blk.T
+                if jackknife:
+                    blkj = pass_results[ip][s]["c4j"][it]
+                    c4j[s, i1, i2] += blkj
+                    if i1 != i2:
+                        c4j[s, i2, i1] += blkj.T
         for ip, it, tr, shared in asm["c3"]:
             for s in range(n_sub):
                 blk = pass_results[ip][s]["t3"][it]

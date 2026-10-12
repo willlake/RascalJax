@@ -14,7 +14,8 @@ normalized by the number of draws in :mod:`rascaljax.driver`.
 Accumulated terms, for every requested covariance block between correlations
 ``c1 = (A, B)`` (bins ``a``) and ``c2 = (C, D)`` (bins ``b``), in flat (s, mu) bins or projected to multipoles:
 
-* ``C4[c1, c2][a, b] = sum w_i^A w_j^B w_k^C w_l^D [xi_AC(ik) xi_BD(jl) + xi_AD(il) xi_BC(jk)] / (RR^c1_a RR^c2_b)``
+* ``C4[A, B; C, D][a, b] = sum w_i^A w_j^B w_k^C w_l^D xi_AC(ik) xi_BD(jl) / (RR^c1_a RR^c2_b)`` for the ordered first
+  pair (the driver adds the terms for (A, B) and (B, A), which gives both Wick contractions)
 * ``T[X, (Y, Y'), Z][a, b] = sum w_i^X w_j^Y w_j^Y' w_k^Z xi_XZ(ik) Theta_a(ij) Theta_b(kj) / (RR_a RR_b)``,
   the 3-point term with the particle ``j`` shared by the two pairs (the four sharing cases of a block
   are assembled from ``T`` tensors by the driver);
@@ -456,8 +457,11 @@ def accumulate_batch(key, primary_idx, data: PassData, st: Static, acc: Accumula
     ba4 = jnp.where(quad, jnp.broadcast_to(bin_ij[:, :, None, None], bin_kl.shape).reshape(-1), 0)
     bb4 = jnp.where(quad, bin_kl.reshape(-1), 0)
     if st.c4_terms:
+        # Only the kernel-matched Wick contraction xi(ik) xi(jl) is accumulated (k drawn around i, l around j with
+        # xi kernels); the other contraction xi(il) xi(jk) is obtained by the driver from the term with the first
+        # pair's samples swapped, which is also kernel-matched. Including xi(il) xi(jk) directly is unbiased but
+        # heavy-tailed (the draws of l are far from i), and dominates the variance at large separations.
         r_jl, mu_jl = separation(pos_j[:, :, None, None, :], pos_l, data.boxsize, per)
-        r_il, mu_il = separation(pos_i[:, None, None, None, :], pos_l, data.boxsize, per)
         inv_p4 = inv_p_q.reshape(-1)
         wi4 = w_i[:, :, None, None, None]
         wj4 = w_j[:, :, :, None, None]
@@ -466,19 +470,15 @@ def accumulate_batch(key, primary_idx, data: PassData, st: Static, acc: Accumula
         jkj4 = jnp.broadcast_to(jk_j[:, :, None, None], bin_kl.shape).reshape(-1)
         jkk4 = jnp.broadcast_to(jk_k[:, :, :, None], bin_kl.shape).reshape(-1)
         jkl4 = jk_l.reshape(-1)
-        cache = {}
-
-        def xi_c(tag, X, Y, r, mu):
-            if (tag, X, Y) not in cache:
-                cache[(tag, X, Y)] = xi(X, Y, r, mu)
-            return cache[(tag, X, Y)]
-
+        cache_ik, cache_jl = {}, {}
         vals, jvals = [], []
         for A, Bs, C, D, ca, cb in st.c4_terms:
-            term1 = xi_c("ik", A, C, r_ik, mu_ik)[..., None] * xi_c("jl", Bs, D, r_jl, mu_jl)
-            term2 = xi_c("il", A, D, r_il, mu_il) * xi_c("jk", Bs, C, r_jk, mu_jk)[..., None]
+            if (A, C) not in cache_ik:
+                cache_ik[(A, C)] = xi(A, C, r_ik, mu_ik)
+            if (Bs, D) not in cache_jl:
+                cache_jl[(Bs, D)] = xi(Bs, D, r_jl, mu_jl)
             ww = wi4[A] * wj4[Bs] * wk4[C] * w_l[D]
-            v = (ww * (term1 + term2)).reshape(-1) * inv_p4 / rrnorm(ca, cb, ba4, bb4)
+            v = (ww * cache_ik[(A, C)][..., None] * cache_jl[(Bs, D)]).reshape(-1) * inv_p4 / rrnorm(ca, cb, ba4, bb4)
             vals.append(v)
             if st.jackknife:
                 jvals.append(v * jackknife_weight_tensor(w_jk, jki4, jkj4, jkk4, jkl4, ba4, bb4, ca, cb))

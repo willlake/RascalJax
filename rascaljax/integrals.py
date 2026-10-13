@@ -45,7 +45,7 @@ jax.config.update("jax_enable_x64", True)
 class GridArrays(NamedTuple):
     """One catalog on the grid (see :class:`rascaljax.grid.CellGrid`)."""
 
-    positions: jax.Array  # (N, 3)
+    positions: jax.Array  # (N, 3), float64 or float32 (see run_cov(positions_float32=...))
     jackknife: jax.Array  # (N,) int32 region index (zeros without jackknives)
     rand_class: jax.Array  # (N,) int32
     cell3: jax.Array  # (N, 3) int32 cell coordinates of each particle
@@ -190,19 +190,25 @@ def draw_particle_in_cell(key, grid: GridArrays, n_side, periodic: bool, cell3):
 
 
 def separation(p1, p2, boxsize, periodic: bool):
-    """``(|r|, |mu|)`` of the pair with the midpoint line of sight (periodic: z axis, minimum image)."""
+    """``(|r|, |mu|)`` of the pair with the midpoint line of sight (periodic: z axis, minimum image).
+
+    Computed in the dtype of the positions (float32 positions give float32 separations, accurate to ~1e-5
+    relative for survey-size coordinates); the results are returned as float64 for the rest of the kernel.
+    """
+    dt = p1.dtype
     d = p1 - p2
     if periodic:
-        d = d - boxsize * jnp.round(d / boxsize)
+        box = boxsize.astype(dt)
+        d = d - box * jnp.round(d / box)
     r = jnp.sqrt(jnp.sum(d * d, axis=-1))
-    safe_r = jnp.where(r > 0, r, 1.0)
+    safe_r = jnp.where(r > 0, r, jnp.asarray(1.0, dt))
     if periodic:
         mu = jnp.abs(d[..., 2]) / safe_r
     else:
         los = p1 + p2
         los_norm = jnp.sqrt(jnp.sum(los * los, axis=-1))
-        mu = jnp.abs(jnp.sum(d * los, axis=-1)) / safe_r / jnp.where(los_norm > 0, los_norm, 1.0)
-    return r, jnp.minimum(mu, 1.0)
+        mu = jnp.abs(jnp.sum(d * los, axis=-1)) / safe_r / jnp.where(los_norm > 0, los_norm, jnp.asarray(1.0, dt))
+    return r.astype(jnp.float64), jnp.minimum(mu, 1.0).astype(jnp.float64)
 
 
 def flat_bin(r, mu, s_edges, n_s: int, n_mu: int):

@@ -18,6 +18,7 @@ N = int(sys.argv[1]) if len(sys.argv) > 1 else 2000
 n_loops = int(sys.argv[2]) if len(sys.argv) > 2 else 64
 use_rascalc = "--rascalc" in sys.argv
 aperiodic = "--aperiodic" in sys.argv
+f32 = "--float32" in sys.argv
 L = 300.0
 N_g = N / 2.0
 g = N_g / N
@@ -91,7 +92,7 @@ cat = rj.Catalog(pos, np.ones(N), n_data=N_g, name="box")
 corr = rj.CorrelationInput(s_edges, rr.reshape(n_s, n_mu), table)
 t0 = time.time()
 raw = rj.run_cov([rj.Sample(cat)], {(0, 0): corr}, mode="s_mu", n_mu=n_mu, N2=10, N3=10, N4=10, n_loops=n_loops, loops_per_sample=1, boxsize=None if aperiodic else L,
-                 xi_cut=150.0, refine_iterations=0, quads_per_batch=2_000_000, seed=5, n_side=11, log=lambda s: None)
+                 xi_cut=150.0, refine_iterations=0, quads_per_batch=2_000_000, seed=5, n_side=11, positions_float32=f32, log=lambda s: None)
 print(f"RascalJax: {time.time() - t0:.1f} s")
 np.set_printoptions(precision=4, linewidth=160)
 c2 = raw.c2[0, :, 0, 0]

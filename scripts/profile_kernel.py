@@ -28,7 +28,8 @@ binning = rj.Binning(s_edges, n_mu, max_l)
 geom = make_geometry([cat], 41, L, 100.0)
 grid = CellGrid.from_catalog(cat, geom)
 memb = grid.sort_membership(cat.weights)[None]
-ga = I.GridArrays(jnp.asarray(grid.positions), jnp.asarray(grid.jackknife, dtype=jnp.int32), jnp.asarray(grid.rand_class, dtype=jnp.int32),
+POS_DTYPE = jnp.float32 if os.environ.get("RJ_FLOAT32", "0") == "1" else jnp.float64
+ga = I.GridArrays(jnp.asarray(grid.positions, dtype=POS_DTYPE), jnp.asarray(grid.jackknife, dtype=jnp.int32), jnp.asarray(grid.rand_class, dtype=jnp.int32),
                   jnp.asarray(geom.cell_3d(grid.positions).astype(np.int32)), jnp.asarray(grid.cell_start), jnp.asarray(grid.cell_count), jnp.asarray(memb))
 r2_n_half = int(np.ceil(200 / geom.cellsize))
 xi_n_half = int(np.ceil(250 / geom.cellsize))

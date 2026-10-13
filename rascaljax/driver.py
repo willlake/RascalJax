@@ -343,7 +343,7 @@ def run_cov(samples: list[Sample], correlations: dict[tuple[int, int], Correlati
             N2: int = 5, N3: int = 10, N4: int = 20, n_loops: int = 32, loops_per_sample: int = 2,
             boxsize: float | None = None, xi_cut: float = 250.0, n_side: int = 301,
             refine_iterations: int = 10, refine_draws: int = 20,
-            quads_per_batch: int = 2_000_000, seed: int = 0,
+            quads_per_batch: int = 2_000_000, seed: int = 0, positions_float32: bool = False,
             xi_lookup_ds: float = 0.25, xi_lookup_n_mu: int = 201,
             devices: list | None = None,
             out_dir: str | None = None, log=None) -> RawCovariance:
@@ -367,6 +367,9 @@ def run_cov(samples: list[Sample], correlations: dict[tuple[int, int], Correlati
     refine_iterations, refine_draws : xi table refinement (RascalC's rescaling), draws per primary per iteration.
     quads_per_batch : controls the batch size (device memory).
     seed : RNG seed (results are reproducible with the same inputs, seed and batch size).
+    positions_float32 : store particle positions and compute separations in float32 (faster, memory-bound kernel);
+        separations of survey-size coordinates are then accurate to ~1e-5 relative, far below the bin widths.
+        All weights, probabilities and accumulations stay in float64. Default False.
     devices : JAX devices to use (default: all available); subsamples are distributed over them.
     out_dir : if given, the raw covariance is saved there as ``Raw_Covariance.npz`` with a log file.
     """
@@ -439,7 +442,8 @@ def run_cov(samples: list[Sample], correlations: dict[tuple[int, int], Correlati
             if s.catalog is catalogs[ic]:
                 memb[i] = g.sort_membership(s.effective_weights)
         cell3 = geom.cell_3d(g.positions).astype(np.int32)
-        grid_arrays.append(GridArrays(jnp.asarray(g.positions), jnp.asarray(g.jackknife, dtype=jnp.int32), jnp.asarray(g.rand_class, dtype=jnp.int32),
+        pos_dtype = jnp.float32 if positions_float32 else jnp.float64
+        grid_arrays.append(GridArrays(jnp.asarray(g.positions, dtype=pos_dtype), jnp.asarray(g.jackknife, dtype=jnp.int32), jnp.asarray(g.rand_class, dtype=jnp.int32),
                                       jnp.asarray(cell3), jnp.asarray(g.cell_start), jnp.asarray(g.cell_count), jnp.asarray(memb)))
     n_side_arr = jnp.asarray(geom.n_side)
     boxsize_arr = jnp.asarray(geom.boxsize)
@@ -636,6 +640,7 @@ def run_cov(samples: list[Sample], correlations: dict[tuple[int, int], Correlati
                         jack_labels, counts,
                         dict(mode=mode, N2=N2, N3=N3, N4=N4, n_loops=n_loops, loops_per_sample=loops_per_sample, seed=seed, xi_cut=xi_cut,
                              n_side=n_side_final, cellsize=geom.cellsize, periodic=periodic, boxsize=0.0 if boxsize is None else boxsize,
+                             positions_float32=positions_float32,
                              galaxies_per_random=gpr, runtime=time.time() - t_start))
     if out_dir is not None:
         raw.save(os.path.join(out_dir, "Raw_Covariance.npz"))

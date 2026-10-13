@@ -42,8 +42,9 @@ Conventions that must stay consistent across modules:
   (s, mu) matrix and project afterwards; do not revert to segment sums over `(s, s) x ell^2`.
 * JAX caches traces per function object: when monkeypatching module functions for ablations, jit a fresh
   wrapper function (see `scripts/profile_ablation.py`), otherwise the patch silently does nothing.
-* `float64` everywhere (`jax_enable_x64` is set on import of `integrals.py`). Positions in float32 are an
-  untested optimization.
+* `float64` everywhere (`jax_enable_x64` is set on import of `integrals.py`). `run_cov(positions_float32=True)`
+  stores positions and computes separations in float32 (verified unbiased against the exact sums), but it gave no
+  measurable speedup on A100s (1.83e8 vs 1.79e8 draws/s): the kernel is not limited by the position gathers.
 * Use `XLA_PYTHON_CLIENT_PREALLOCATE=false` only on shared GPUs; on an exclusive node leave the default.
 * Never run the C++ comparisons in periodic mode as a reference: the RascalC periodic binaries are biased high
   by ~3% (C3) and ~6% (C4) against exact sums; the aperiodic binaries are unbiased.

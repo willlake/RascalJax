@@ -174,3 +174,5 @@ and come from the Gaussian + shot-noise model, not from the sampling.
 
 A "draw" is one sampled pair, triple or quad; the scatter-add into the (s, mu)^2 matrix is 40% of the kernel.
 Multi-GPU scaling is limited by the single-threaded host dispatch (1.6x on 2 GPUs, 1.65x on 3).
+Storing positions in float32 (`positions_float32=True`) leaves the exact-sum agreement unchanged (C2 0.1%, C3 0.5%,
+C4 1-3%, periodic and aperiodic) but does not speed the kernel up (1.83e8 vs 1.79e8 draws/s on one A100).

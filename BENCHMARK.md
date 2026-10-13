@@ -109,10 +109,29 @@ slightly lower) and within the noise above. Against the mocks both codes show th
 variance of the mocks is 10-35% larger below 50 Mpc/h (nonlinear RSD beyond the Gaussian + shot-noise model) and
 the ell = 0 variance 5-20% smaller than the analytic ones between 80 and 180 Mpc/h.
 
-### Converged runs
+### SGC, 256 loops (5.2e11 quads, 32 minutes on 2 A100s), kernel-matched estimator
 
-256-loop runs per cap (NGC 1e12 quads, SGC 5e11) with the kernel-matched estimator are in progress; this section
-will be completed with their numbers and the NGC+SGC combination (`scripts/desi_dr2_combine.py`).
+| quantity | value |
+|---|---|
+| shot-noise rescaling (jackknife fit) | 1.013 |
+| positive definite, N_eff | yes, 52 000 |
+| convergence check (halves of the subsamples) R_inv / chi2_red - 1 | 0.15 / 0.01 |
+| diagonal RascalJax / official, all s, ell = 0 (ell = 2) | 0.985 (0.98 - 0.99), uniform in s |
+| official vs RascalJax, ell = 0, 2, 4: R_inv / chi2_red - 1 | 0.086, 0.083 / 0.0002, 0.007 |
+| official vs RascalJax, ell = 0, 2 | 0.071, 0.068 / 0.0007, 0.004 |
+| RascalJax vs 1007 GLAM mocks, ell = 0, 2, 4 | 0.358, 0.456 / -0.004, 0.148 |
+| official RascalC vs the same mocks, ell = 0, 2, 4 | 0.353, 0.454 / -0.007, 0.149 |
+| RascalJax vs mocks, ell = 0, 2 | 0.297, 0.358 / -0.012, 0.110 |
+| official RascalC vs mocks, ell = 0, 2 | 0.294, 0.357 / -0.014, 0.110 |
+| mean reduced chi2 of the mock xi (0, 2, 4) with the RascalJax precision matrix | 0.996 |
+
+The converged RascalJax covariance is 1.5% below the official one everywhere (consistent with the 0.4% difference in
+the fitted shot-noise rescaling plus the different random subset and refinement target), and is statistically
+indistinguishable from the official RascalC covariance in its agreement with the mocks.
+
+### NGC, 256 loops
+
+In progress (1e12 quads); to be completed together with the NGC+SGC combination (`scripts/desi_dr2_combine.py`).
 
 ## 6. Performance
 

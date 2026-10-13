@@ -7,7 +7,9 @@ independent subsamples, plus everything needed by :mod:`rascaljax.postprocess`.
 from __future__ import annotations
 
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Sequence
 
@@ -535,27 +537,34 @@ def run_cov(samples: list[Sample], correlations: dict[tuple[int, int], Correlati
         batch = max(1, min(n_prim, quads_per_batch // per_prim))
         log(f"Pass {ip + 1}/{len(passes)}: legs={p.legs}, {n_prim} primaries, batch {batch} ({per_prim} draws per primary), {n_loops} loops")
         key_pass = jax.random.fold_in(key0, ip)
-        # subsamples are distributed round-robin over the devices; batches are dispatched asynchronously so all
-        # devices work concurrently; results come back to the host once a round of subsamples is complete
+        # subsamples are distributed round-robin over the devices, each driven by its own host thread (JAX dispatch
+        # is thread-safe), so the devices run concurrently without the host loop interleaving their batches
         data_dev = [jax.device_put(data, dev) for dev in devices]
         subsamples = [None] * n_sub
         t0 = time.time()
-        for round_start in range(0, n_sub, n_dev):
-            active = list(range(round_start, min(round_start + n_dev, n_sub)))
-            accs = {s: jax.device_put(zero_accumulators(st), devices[s - round_start]) for s in active}
-            for il in range(loops_per_sample):
-                for ib, start in enumerate(range(0, n_prim, batch)):
-                    for s in active:
-                        dev_i = s - round_start
-                        loop = s * loops_per_sample + il
-                        key_loop = jax.random.fold_in(key_pass, loop)
-                        idx = jax.device_put(jnp.arange(start, min(start + batch, n_prim)), devices[dev_i])
-                        accs[s] = accumulate_batch_jit(jax.device_put(jax.random.fold_in(key_loop, ib), devices[dev_i]), idx, data_dev[dev_i], st, accs[s])
-            for s in active:
-                subsamples[s] = _normalize(accumulators_to_numpy(accs[s]), p, gpr, n_prim)
-            done = (active[-1] + 1) * loops_per_sample
-            el = time.time() - t0
-            log(f"  loop {done}/{n_loops} done ({el:.1f} s elapsed, ~{el / done * (n_loops - done):.1f} s left)")
+        done = [0]
+        lock = threading.Lock()
+
+        def worker(dev_i):
+            dev = devices[dev_i]
+            for s_idx in range(dev_i, n_sub, n_dev):
+                acc = jax.device_put(zero_accumulators(st), dev)
+                for il in range(loops_per_sample):
+                    key_loop = jax.random.fold_in(key_pass, s_idx * loops_per_sample + il)
+                    for ib, start in enumerate(range(0, n_prim, batch)):
+                        idx = jax.device_put(jnp.arange(start, min(start + batch, n_prim)), dev)
+                        acc = accumulate_batch_jit(jax.device_put(jax.random.fold_in(key_loop, ib), dev), idx, data_dev[dev_i], st, acc)
+                result = _normalize(accumulators_to_numpy(acc), p, gpr, n_prim)
+                with lock:
+                    subsamples[s_idx] = result
+                    done[0] += loops_per_sample
+                    el = time.time() - t0
+                    log(f"  loop {done[0]}/{n_loops} done ({el:.1f} s elapsed, ~{el / done[0] * (n_loops - done[0]):.1f} s left)")
+
+        with ThreadPoolExecutor(max_workers=n_dev) as pool:
+            futures = [pool.submit(worker, d) for d in range(min(n_dev, n_sub))]
+            for f in futures:
+                f.result()
         el = time.time() - t0
         n_q = n_prim * n_loops * per_prim
         log(f"  pass done in {el:.1f} s: {n_q:.3e} draws, {n_q / el:.3e} draws/s")

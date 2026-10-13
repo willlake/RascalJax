@@ -34,6 +34,10 @@ Conventions that must stay consistent across modules:
 * Jackknife weight tensor and its `1 - sum_A w_aA w_bA` normalization follow RascalC; the EE/RR disconnected
   arrays use the full-cell draw probability and `0.25 n_pairs` normalization (not RascalC's class-conditional one).
 
+Multi-GPU: `run_cov` gives each device its own host thread (`ThreadPoolExecutor`) that drives that device's
+subsamples; JAX dispatch is thread-safe and the compiled kernel is shared. Results do not depend on the number of
+devices because the RNG keys depend only on the loop index.
+
 ## Working rules
 
 * Keep the kernel pure and shape-static: everything that affects shapes or control flow goes into `Static`

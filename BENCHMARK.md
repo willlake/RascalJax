@@ -51,7 +51,9 @@ jbar_l jbar_l (Grieb et al. 2016):
 * C3 (the 2P/n term): ratio 0.99-1.01 on all diagonal and off-diagonal elements;
 * C2 (the 1/n^2 term): ratio 1.036 uniformly, which is the k-integral cutoff of the analytic delta function (not
   the code; C2 agrees with the exact sums above);
-* C4 (the P^2 term): agrees within its MC error (the diagonal at large s is the noisiest element of the estimator).
+* C4 (the P^2 term): with the kernel-matched estimator, the ell = 0 diagonal agrees to 0.98 - 1.02 in every bin at
+  32 loops (6.4e9 quads); with the earlier estimator including the second Wick contraction per quad the same run
+  scattered between 0.65 and 1.5 at s > 60 Mpc/h.
 
 ## 4. Head-to-head with the RascalC C++ code
 
@@ -169,10 +171,12 @@ and come from the Gaussian + shot-noise model, not from the sampling.
 |---|---|
 | RascalC C++, one CPU thread (Perlmutter, periodic box) | 2.5e7 |
 | RascalJax, one A100-80GB (box, Legendre, 1000 draws per primary) | 2.0e8 |
-| RascalJax, 3 A100s (DESI NGC run) | 3.3e8 |
+| RascalJax, 2 A100s (per-device threads, box, incl. compilation) | 2.9e8 |
+| RascalJax, 4 A100s (per-device threads, box, incl. compilation) | 5.0e8 |
 | RascalJax, kernel without the final scatter (floor) | 3.6e8 per GPU |
 
 A "draw" is one sampled pair, triple or quad; the scatter-add into the (s, mu)^2 matrix is 40% of the kernel.
-Multi-GPU scaling is limited by the single-threaded host dispatch (1.6x on 2 GPUs, 1.65x on 3).
+Each device is driven by its own host thread (subsamples round-robin over devices); results are bitwise
+identical for any number of devices. Before the threads, a shared host loop limited the scaling to 1.6x on 2 GPUs.
 Storing positions in float32 (`positions_float32=True`) leaves the exact-sum agreement unchanged (C2 0.1%, C3 0.5%,
 C4 1-3%, periodic and aperiodic) but does not speed the kernel up (1.83e8 vs 1.79e8 draws/s on one A100).

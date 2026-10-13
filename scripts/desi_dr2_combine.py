@@ -16,14 +16,19 @@ d_ngc, d_sgc, d_comb = sys.argv[1:4]
 official_fn = sys.argv[4] if len(sys.argv) > 4 else None
 os.makedirs(d_comb, exist_ok=True)
 covs, weights, binning = [], [], None
-for d in (d_ngc, d_sgc):
+inputs = [np.load(os.path.join(d, "inputs.npz")) for d in (d_ngc, d_sgc)]
+have_wcounts = all("rr_wcounts" in inp.files for inp in inputs)  # the weights of both caps must share one convention
+for d, inp in zip((d_ngc, d_sgc), inputs):
     res = np.load(os.path.join(d, "rascaljax", "Rescaled_Covariance.npz"))
-    inp = np.load(os.path.join(d, "inputs.npz"))
     raw = rj.RawCovariance.load(os.path.join(d, "rascaljax", "Raw_Covariance.npz"))
     binning = raw.binning
     covs.append(res["full_theory_covariance"])  # (s, ell) ordering, all bins kept
-    weights.append(inp["rr_wcounts"].ravel())
+    if have_wcounts:
+        weights.append(inp["rr_wcounts"].ravel())
+    else:  # unnormalized counts ~ normalized counts x (sum of random weights)^2 (same random density in both caps)
+        weights.append(inp["rr"].ravel() * inp["weights"].sum() ** 2)
     print(d, "alpha", res["shot_noise_rescaling"], "N_eff", res["N_eff"])
+print("weights from", "pycorr RR wcounts" if have_wcounts else "normalized counts x (sum of random weights)^2")
 cov = combine_regions(covs, weights, binning)
 cov_ls = binning.to_pycorr_order(cov)
 np.savez(os.path.join(d_comb, "combined_covariance.npz"), cov_s_ell=cov, cov_ell_s=cov_ls, s_edges=binning.s_edges, max_l=binning.max_l)

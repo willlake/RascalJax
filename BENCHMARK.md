@@ -129,9 +129,39 @@ The converged RascalJax covariance is 1.5% below the official one everywhere (co
 the fitted shot-noise rescaling plus the different random subset and refinement target), and is statistically
 indistinguishable from the official RascalC covariance in its agreement with the mocks.
 
-### NGC, 256 loops
+### NGC, 256 loops (1.0e12 quads, 65 minutes on 2 A100s), kernel-matched estimator
 
-In progress (1e12 quads); to be completed together with the NGC+SGC combination (`scripts/desi_dr2_combine.py`).
+| quantity | value |
+|---|---|
+| shot-noise rescaling (jackknife fit) | 0.985 |
+| positive definite, N_eff | yes, 76 000 |
+| convergence check (halves of the subsamples) R_inv / chi2_red - 1 | 0.12 / 0.008 |
+| diagonal RascalJax / official, all s, ell = 0 | 0.98 - 0.985, uniform in s |
+| official vs RascalJax, ell = 0, 2, 4: R_inv / chi2_red - 1 | 0.072, 0.070 / -0.006, 0.011 |
+| official vs RascalJax, ell = 0, 2 | 0.060, 0.059 / -0.007, 0.011 |
+| RascalJax vs 1007 GLAM mocks, ell = 0, 2, 4 | 0.357, 0.499 / -0.036, 0.194 |
+| official RascalC vs the same mocks, ell = 0, 2, 4 | 0.351, 0.501 / -0.045, 0.202 |
+| RascalJax vs mocks, ell = 0, 2 | 0.295, 0.375 / -0.041, 0.143 |
+| official RascalC vs mocks, ell = 0, 2 | 0.293, 0.380 / -0.049, 0.152 |
+| mean reduced chi2 of the mock xi (0, 2, 4) with the RascalJax precision matrix | 0.964 |
+
+### GCcomb = NGC + SGC combined (`scripts/desi_dr2_combine.py`)
+
+RR-weighted combination of the two converged per-cap covariances, against the official GCcomb RascalC
+covariance and the GCcomb mock covariance (1007 mocks):
+
+| quantity | value |
+|---|---|
+| diagonal RascalJax / official, ell = 0 (ell = 2) | 0.982 - 0.985 (0.972 - 0.984) |
+| official vs RascalJax, ell = 0, 2, 4: R_inv / chi2_red - 1 | 0.060, 0.058 / -0.004, 0.008 |
+| RascalJax vs mocks, ell = 0, 2, 4 | 0.356, 0.475 / -0.022, 0.172 |
+| official RascalC vs mocks, ell = 0, 2, 4 | 0.352, 0.477 / -0.028, 0.177 |
+
+Summary: on DESI DR2 data RascalJax reproduces the official RascalC covariance to R_inv ~ 0.06-0.09 (a 1.5-2%
+lower overall amplitude, consistent with the different random subset, refinement target and the fitted
+rescalings 0.985 / 1.013), and both agree with the mock sample covariance to the same degree. The remaining
+RascalJax-vs-mock differences (ell = 2 at s < 50 Mpc/h, ell = 0 at 80-180 Mpc/h) are shared with the official code
+and come from the Gaussian + shot-noise model, not from the sampling.
 
 ## 6. Performance
 

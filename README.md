@@ -61,7 +61,8 @@ sA = rj.Sample.from_redshift_range(cat, z, 0.4, 0.7, "zA")
 sB = rj.Sample.from_redshift_range(cat, z, 0.6, 0.9, "zB")
 raw = rj.run_cov([sA, sB], {(0, 0): corr_AA, (0, 1): corr_AB, (1, 1): corr_BB}, ...)
 ```
-Here `corr_AB` holds the cross pair counts and cross-correlation function between the two redshift bins.
+Here `corr_AB` holds the cross pair counts and cross-correlation function between the two redshift bins. How the
+cross terms between the bins are computed is explained in `OVERLAPPING_REDSHIFT_BINS.md`.
 
 ## Examples
 

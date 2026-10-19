@@ -1,7 +1,8 @@
 # RascalJax development notes
 
 Importance-sampled covariance matrices of 2-point correlation functions (a JAX rewrite of RascalC). Read
-`README.md` for the user-facing picture and `BENCHMARK.md` for the validation status before changing the numerics.
+`README.md` for the user-facing picture, `BENCHMARK.md` for the validation status before changing the numerics, and
+`OVERLAPPING_REDSHIFT_BINS.md` for how samples sharing particles (overlapping redshift bins) are handled.
 
 ## Layout and data flow
 

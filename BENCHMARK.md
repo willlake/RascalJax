@@ -21,20 +21,25 @@ aperiodic binaries are unbiased. The variations with N2/N3/N4 and grid size did 
 
 ## 2. Multi-sample bookkeeping (`scripts/bruteforce_multi.py`)
 
-Two overlapping slabs of a periodic box as two samples on one catalog (3000 particles, 256 loops). All six
-covariance blocks between the correlations AA, AB, BB agree with exact sums carrying the membership weights:
+Two overlapping slabs of a periodic box as two samples on one catalog (3000 particles, 256 loops, kernel-matched
+estimator; rerun on 2026-10-18 after the correction of the exact C4 reference, whose coincident-index terms had been
+subtracted with full matrices instead of their diagonals, a <1% effect at this catalog size). All six covariance
+blocks between the correlations AA, AB, BB agree with exact sums carrying the membership weights:
 
 | block | C2 / exact | C3 / exact | C4 / exact |
 |---|---|---|---|
-| AA x AA | 0.998 - 1.003 (0.3%) | 0.999 - 1.024 (1%) | 0.95 - 1.05 (4-9%) |
-| AA x AB | 0.995 - 1.002 | 1.005 - 1.015 (1.5%) | 0.93 - 1.27 (5-24%) |
-| AA x BB | 0.992 - 1.001 | 1.000 - 1.042 (2%) | 0.94 - 1.6 (5-50%) |
-| AB x AB | 0.995 - 1.002 | 0.996 - 1.017 (1.5%) | 0.93 - 1.21 (5-20%) |
-| AB x BB | 0.994 - 1.001 | 0.985 - 1.028 (1.5%) | 0.95 - 1.46 (5-34%) |
-| BB x BB | 0.994 - 1.000 | 0.993 - 1.002 (1%) | 0.86 - 1.24 (4-18%) |
+| AA x AA | 0.998 - 1.003 (0.3%) | 0.999 - 1.024 (1%) | 0.97 - 1.05 (2-3.5%) |
+| AA x AB | 0.995 - 1.002 (0.5%) | 1.005 - 1.015 (1.5%) | 0.91 - 1.03 (4-5%) |
+| AA x BB | 0.992 - 1.001 (0.6%) | 1.000 - 1.042 (2%) | 0.92 - 1.05 (4-6%) |
+| AB x AB | 0.995 - 1.002 (0.4%) | 0.996 - 1.017 (1.5%) | 0.91 - 1.03 (3-4%) |
+| AB x BB | 0.994 - 1.001 (0.5%) | 0.985 - 1.028 (1.5%) | 0.92 - 1.03 (3.5-4%) |
+| BB x BB | 0.994 - 1.000 (0.3%) | 0.993 - 1.002 (1%) | 0.93 - 1.02 (2.5%) |
 
-(ranges over the diagonal elements; MC errors in parentheses; C4 at the largest separation is poorly sampled in
-this tiny box).
+(ranges over the diagonal elements; MC errors in parentheses). The low end of every C4 range is the first
+separation bin (20-40 Mpc/h, mu < 0.5), 2-2.5 sigma low in the mixed blocks; all blocks are built from the same
+quads, so this is one correlated fluctuation of the run (seed 5), not six. With seed 11 the same bin comes out
+1.03 - 1.05 (3-5%) in every block and the other bins 0.95 - 1.06, i.e. C2 within 0.5%, C3 within 1.5% and C4
+within 1-2 sigma for both seeds.
 
 The same particles split into two disjoint z-slabs treated as two *catalogs* (two sampling passes planned by
 `plan_passes`): the auto blocks AA x AA, BB x BB and AB x AB agree with the exact sums (C2 within 0.5%, C3 within
@@ -165,7 +170,70 @@ rescalings 0.985 / 1.013), and both agree with the mock sample covariance to the
 RascalJax-vs-mock differences (ell = 2 at s < 50 Mpc/h, ell = 0 at 80-180 Mpc/h) are shared with the official code
 and come from the Gaussian + shot-noise model, not from the sampling.
 
-## 6. Performance
+## 6. DESI DR2 LRG, overlapping redshift bins 0.4 < z < 0.55 and 0.45 < z < 0.6 (NGC, pre-reconstruction)
+
+First validation of the multi-sample covariance (`OVERLAPPING_REDSHIFT_BINS.md`) against mocks: two `Sample`s of one
+catalog. The catalog is the 0.4 < z < 0.6 random set of GLAM-Uchuu altmtl mock 150 (3.0e6 of the 1.57e7 randoms of
+4 files, `n_data` = 694 911 galaxies in 0.4-0.6; bin A holds 480 667, bin B 558 236, and the shared range 0.45-0.55
+about two thirds of each). Inputs (`scripts/desi_zbins_measure_mocks.py`, `desi_zbins_prepare.py`,
+`desi_zbins_run.py`): pycorr counts (cucount on GPUs, Corrfunc on CPUs) in 1 Mpc/h x 200 mu bins, Landy-Szalay with
+the same 2 random files for DR and RR (see the note below); covariance bins 40-160 Mpc/h in 4 Mpc/h steps, 100 mu
+bins, multipoles 0, 2, 4; xi tables (2 Mpc/h x 10 mu bins) averaged over, and RR counts taken from, 5 mocks measured
+to 250 Mpc/h with all three correlations; sample covariance of the (AA, BB) data vector from 350 mocks measured to
+160 Mpc/h (AB is not part of the BAO fit). Run: 256 loops, 16 loops per subsample, N2, N3, N4 = 5, 10, 20, 7.7e11
+draws, 72 minutes on 4 A100-40GB (1.8e8 draws/s). The shot-noise rescaling is fitted to the mock covariance (the mock
+counts carry no jackknives). Metrics as in section 5, plus D_KL; "expected" values are what the sampling noise of
+350 mocks alone produces (Wishart draws from the RascalJax covariance, 104 bins).
+
+| quantity | value |
+|---|---|
+| RR check (Monte Carlo estimate / input counts, median), AA, AB, BB | 0.999, 0.999, 1.000 |
+| shot-noise rescaling, fit on the AA block (fit on AA and BB) | 1.229 (1.216) |
+| (AA, BB), ell = 0, 2, 48-152 Mpc/h: positive definite, N_eff | yes, 145 000 |
+| same block, halves of the subsamples: R_inv / D_KL / chi2_red - 1 | 0.078 / 0.15 / 0.006 |
+| same block, min eigenvalue of C2^-1/2 C4 C2^-1/2 (threshold) | -0.12 (-1.5) |
+| mean reduced chi2 of the 350 mock xi with the RascalJax precision, alpha = 1 (AA, BB, joint) | 1.268, 1.240, 1.255 |
+| same with alpha = 1.229 | 0.989, 0.971, 0.980 |
+| mocks vs RascalJax, (AA, BB) ell = 0, 2: R_inv / D_KL / chi2_red - 1 | 1.07, 0.53 / 14.0, 8.6 / 0.46, -0.025 |
+| expected from the mock sampling noise alone (mean +- scatter) | 1.04 +- 0.03, 0.55 +- 0.01 / 13.7 +- 0.5, 8.8 +- 0.2 / 0.43 +- 0.01, 0.00 +- 0.01 |
+| diagonal RascalJax / mocks, ell = 0, mean over s < 120 (s > 130): A, B | 1.12 (0.96), 1.05 (1.04); mock noise 0.05 (0.06) |
+| diagonal RascalJax / mocks, ell = 2, 48-152 Mpc/h (A, B) | 0.92-1.12, 0.83-1.05 |
+| mean offset of the AA x BB correlation coefficient, model - mocks, ell = 0 (ell = 2) | +0.017 (-0.009); expected scatter 0.017 |
+| AA x BB correlation coefficient, ell = 0, 40 -> 160 Mpc/h: RascalJax (mocks) | 0.65 -> 0.53 (0.61 -> 0.60, +-0.03) |
+| (AA, AB, BB) ell = 0, 2 joint matrix | not positive definite (min eigenvalue -4e-10, max 2e-4); not converged |
+
+Summary: with one rescaling per catalog the RascalJax covariance of the two overlapping bins matches the 350-mock
+covariance to the mock noise: the mocks' reduced chi2 is 0.99 / 0.97 / 0.98 (A, B, joint), the D_KL and the reduced
+chi2 of the mock-vs-theory comparison are what the finite number of mocks predicts, and the cross-covariance of the
+bins, the new ingredient, agrees at every separation and direction (1.0 sigma mean offset). The remaining differences
+(monopole variance of A 12% high below 120 Mpc/h, 2.4 sigma; quadrupole of B 10-15% low on 100-140 Mpc/h) are the
+usual size of RascalC-vs-mock differences. The AB-inclusive matrix has a near-null direction in C2 (with two thirds of
+each bin shared, xi_AB is nearly a combination of xi_AA and xi_BB) that the 4-point sampling noise has not resolved at
+256 loops; it is not needed for a BAO fit of (AA, BB).
+
+**Note on the mock measurement (a trap worth recording).** A first sample covariance was built with DR from 10 random
+files and RR from 2 (RR being the expensive count, passed as `R1R2`). Against the same RascalJax covariance it showed
+the monopole variance 15-25% low above 130 Mpc/h (3.0 sigma for A) and the monopole cross-bin correlation coefficient
+0.05-0.10 high (3.7 sigma), with the quadrupole and all transverse pairs fine. Three RascalJax runs with different xi
+tables (per-correlation 5-mock tables, a common table, the 350-mock-mean table with a Kaiser extension) were
+identical, so the model was excluded. The cause is the estimator: Landy-Szalay cancels the random catalog's edge
+noise only when DR and RR use the same randoms. Measured on mock 150, two independent 2-file RR realizations differ
+by 3-6e-4 at s = 150 Mpc/h for mu > 0.4 and by < 0.4e-4 transversally, which is 0.13 (s = 42) to 0.3 (s = 100-140)
+of the mocks' monopole scatter: about 10% of the variance, coherent in s, radial, and independent between the bins
+(different redshift edges). Recomputing DR with the 2 RR files (`scripts/remeasure_dr2.py`, 45 s per mock on an
+A100) removed both anomalies. The rescaling rose from 1.145 to 1.227 because the Landy-Szalay random-noise term with
+2 files (of order N_D/N_R = 1/11 of the shot-noise part) is now in the mocks' variance; a fully clean sample
+covariance would use 4 or more identical random files for DD, DR and RR (5-20 GPU-hours for 350 mocks).
+`desi_zbins_measure_mocks.py` now defaults to the same files for DR and RR, and `desi_zbins_remeasure_dr.py` applies
+the fix to stored counts. The xi tables and RR inputs (5 long-range mocks) were remeasured the same way and RascalJax
+rerun on them: the covariance changed by under 1%, the numbers above are from that final run. Outputs:
+`/pscratch/sd/w/willlake/rascaljax/desi_zbins_LRG_z0.4-0.55_z0.45-0.6/NGC/rascaljax/` (first comparison in
+`NGC_first/rascaljax/`, intermediate one in `NGC_dr2/`; figure `validation_NGC.png` in each; the contaminated
+measurements are kept as `xi_*_NGC_dr10rr2.npy`). The executed notebook
+`notebooks/04_desi_overlapping_bins_validation.ipynb` reproduces every number of this section, with the
+correlation matrices, the chi2 distribution of the mocks, the Wishart expectations and the before/after comparison.
+
+## 7. Performance
 
 | setting | draws per second |
 |---|---|

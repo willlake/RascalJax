@@ -1,7 +1,7 @@
 """Brute-force check of the multi-sample machinery: two overlapping samples on one catalog (overlapping "redshift"
 slabs of a periodic box) and two disjoint samples as separate catalogs, against exact sums with membership weights.
 
-Usage: python bruteforce_multi.py [N] [n_loops]
+Usage: python bruteforce_multi.py [N] [n_loops] [seed=5]
 """
 import os
 import sys
@@ -17,6 +17,7 @@ from rascaljax.utils import symmetrized
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 3000
 n_loops = int(sys.argv[2]) if len(sys.argv) > 2 else 256
+seed = int(sys.argv[3]) if len(sys.argv) > 3 else 5
 L = 300.0
 N_g = N / 2.0
 g = N_g / N
@@ -107,11 +108,11 @@ def c4_exact(c1, c2):
             # remove i == l (term1) / i == k (term2 has xi_il with l=i -> xi_ii = 0 kills), j == k (term1) / j == l (term2)
             XMb = X @ Mb
             il1 = np.sum(Ma * X.T * np.diag(XMb)[:, None])  # term1 with l = i
-            jk1 = np.sum(Ma * X * (Mb @ X.T).T)  # term1 with k = j
+            jk1 = np.sum(Ma * X * np.diag(Mb @ X.T)[None, :])  # term1 with k = j: sum_l Mb[j,l] X[j,l], broadcast over i
             both1 = np.sum(Ma * X * X.T * Mb.T)
             XMbT = X @ Mb.T
             ik2 = np.sum(Ma * X.T * np.diag(XMbT)[:, None])  # term2 with k = i: M_a[i,j] xi_il xi_ji M_b[i,l]
-            jl2 = np.sum(Ma * X * (Mb.T @ X.T).T)  # term2 with l = j: M_a[i,j] xi_ij xi_jk M_b[k,j]
+            jl2 = np.sum(Ma * X * np.diag(Mb.T @ X.T)[None, :])  # term2 with l = j: sum_k Mb[k,j] X[j,k], broadcast over i
             both2 = np.sum(Ma * X * X.T * Mb)
             out[a, bb] = (T1 - il1 - jk1 + both1 + T2 - ik2 - jl2 + both2) / (rr[c1][a] * rr[c2][bb])
     return out
@@ -127,11 +128,12 @@ print(f"exact sums in {time.time() - t0:.0f} s")
 # ----- RascalJax: two samples on one catalog -----
 cat = rj.Catalog(pos, np.ones(N), n_data=N_g, name="box")
 sA, sB = rj.Sample(cat, memb["A"], "A"), rj.Sample(cat, memb["B"], "B")
-inputs = {(0, 0): rj.CorrelationInput(s_edges, rr[("A", "A")].reshape(n_s, n_mu), table),
-          (0, 1): rj.CorrelationInput(s_edges, rr[("A", "B")].reshape(n_s, n_mu), table),
-          (1, 1): rj.CorrelationInput(s_edges, rr[("B", "B")].reshape(n_s, n_mu), table)}
+# the exact counts use w = 1/N over the whole catalog: catalog normalization
+inputs = {(0, 0): rj.CorrelationInput(s_edges, rr[("A", "A")].reshape(n_s, n_mu), table, rr_normalization="catalog"),
+          (0, 1): rj.CorrelationInput(s_edges, rr[("A", "B")].reshape(n_s, n_mu), table, rr_normalization="catalog"),
+          (1, 1): rj.CorrelationInput(s_edges, rr[("B", "B")].reshape(n_s, n_mu), table, rr_normalization="catalog")}
 kw = dict(mode="s_mu", n_mu=n_mu, N2=10, N3=10, N4=10, n_loops=n_loops, loops_per_sample=1, boxsize=L, xi_cut=150.0, refine_iterations=0,
-          quads_per_batch=2_000_000, seed=5, n_side=11, log=lambda s: None)
+          quads_per_batch=2_000_000, seed=seed, n_side=11, log=lambda s: None)
 t0 = time.time()
 raw = rj.run_cov([sA, sB], inputs, **kw)
 print(f"RascalJax (one catalog, overlapping samples): {time.time() - t0:.1f} s")

@@ -43,6 +43,13 @@ class CorrelationInput:
     jack_rr : optional (n_jack, n_s * n_mu) jackknife random pair counts (RascalC convention:
         ``RR_A = RR_{A x all} + ...``, i.e. they sum to ``rr`` over regions).
     jack_labels : optional (n_jack,) region labels matching the catalogs' ``jackknife`` labels.
+    rr_normalization : convention of the normalized counts ``rr`` (``jack_rr`` only enters through ratios):
+        ``"sample"`` (default): normalized by the weight sums of the two *samples* the pairs were counted on, as
+        ``pycorr`` / ``lsstypes`` do when the counts are measured on the randoms selected for each sample
+        (``RR / (W_A W_B)``); :func:`run_cov` converts them with the samples' weight sums ``F_A F_B``.
+        ``"catalog"``: already ``sum_{i != j} w_i^A w_j^B Theta_a(ij)`` with the catalog weights normalized to unit
+        sum over the *whole* catalog, i.e. the kernel's convention (counts built from ``Sample.effective_weights``).
+        The two coincide for a sample covering its whole catalog.
     """
 
     s_edges: Array
@@ -51,8 +58,11 @@ class CorrelationInput:
     jack_xi: Array | None = None
     jack_rr: Array | None = None
     jack_labels: Array | None = None
+    rr_normalization: str = "sample"
 
     def __post_init__(self):
+        if self.rr_normalization not in ("sample", "catalog"):
+            raise ValueError('rr_normalization must be "sample" or "catalog"')
         self.s_edges = np.asarray(self.s_edges, dtype=float).ravel()
         self.rr = np.asarray(self.rr, dtype=float)
         if self.rr.ndim != 2 or self.rr.shape[0] != len(self.s_edges) - 1:
@@ -357,7 +367,9 @@ def run_cov(samples: list[Sample], correlations: dict[tuple[int, int], Correlati
         The samples (membership-weighted views of random catalogs) whose correlation functions are covered.
     correlations : dict ``{(i_sample, j_sample): CorrelationInput}``
         The correlation functions to compute the covariance of (keys with ``i <= j``). All must share the
-        separation binning and the number of mu bins.
+        separation binning and the number of mu bins. Their pair counts are converted to the kernel's
+        catalog normalization according to ``CorrelationInput.rr_normalization``; the log reports the Monte
+        Carlo estimate of every correlation's RR over the input counts as a consistency check.
     mode : ``"legendre"`` (covariance of even multipoles projected from mu bins, as pycorr) or ``"s_mu"``.
     max_l : maximum even multipole for ``mode="legendre"``.
     n_mu : number of mu bins of the pair counts in [0, 1]; inferred from the inputs if None.
@@ -506,7 +518,15 @@ def run_cov(samples: list[Sample], correlations: dict[tuple[int, int], Correlati
         raise ValueError(f"Correlation functions are needed for all sample pairs; missing {missing}")
 
     # ----- normalizing counts and jackknife weights -----
-    rr_arr = jnp.asarray(np.stack([ci.rr.ravel() for ci in corr_inputs]))
+    # The kernel's pair counts are sums of effective weights normalized over the whole catalog. Counts normalized per
+    # sample (pycorr / lsstypes on the randoms selected for each sample) are converted with the samples' weight sums.
+    w_sum = np.array([float(np.sum(s.effective_weights)) for s in samples])
+    rr_factors = np.array([w_sum[sa] * w_sum[sb] if ci.rr_normalization == "sample" else 1.0
+                           for (sa, sb), ci in zip(corr_keys, corr_inputs)])
+    rr_arr = jnp.asarray(np.stack([ci.rr.ravel() * f for ci, f in zip(corr_inputs, rr_factors)]))
+    for ic, ((sa, sb), f) in enumerate(zip(corr_keys, rr_factors)):
+        if abs(f - 1.0) > 1e-12:
+            log(f"RR counts of correlation {ic} (samples {sa}, {sb}) converted from sample to catalog normalization: factor {f:.6f}")
     if jackknife:
         jw = []
         for ci in corr_inputs:
@@ -638,6 +658,13 @@ def run_cov(samples: list[Sample], correlations: dict[tuple[int, int], Correlati
                 if jackknife:
                     ee[s, ic] = pass_results[ip][s]["ee"][it]
                     rrj[s, ic] = pass_results[ip][s]["rrj"][it]
+    # consistency check: the sampled RR must reproduce the input counts (catalog normalization, randoms matching the samples)
+    rr_ratio = np.median(rr_est.mean(axis=0) / np.asarray(rr_arr), axis=1)
+    log("RR check (Monte Carlo estimate / input counts, median over bins): " + ", ".join(f"corr {ic}: {r:.4f}" for ic, r in enumerate(rr_ratio)))
+    bad = np.flatnonzero(np.abs(rr_ratio - 1.0) > 0.05)
+    if len(bad):
+        log(f"WARNING: the sampled RR of correlation(s) {bad.tolist()} differ from the input counts by more than 5%: check the "
+            "normalization convention of the pair counts (CorrelationInput.rr_normalization) and that the randoms match the samples")
     counts = {}
     for ip, p in enumerate(passes):
         for k in ("n2", "n3", "n4", "n_draws"):
@@ -649,7 +676,7 @@ def run_cov(samples: list[Sample], correlations: dict[tuple[int, int], Correlati
                         jack_labels, counts,
                         dict(mode=mode, N2=N2, N3=N3, N4=N4, n_loops=n_loops, loops_per_sample=loops_per_sample, seed=seed, xi_cut=xi_cut,
                              n_side=n_side_final, cellsize=geom.cellsize, periodic=periodic, boxsize=0.0 if boxsize is None else boxsize,
-                             positions_float32=positions_float32,
+                             positions_float32=positions_float32, rr_factors=rr_factors, rr_check=rr_ratio,
                              galaxies_per_random=gpr, runtime=time.time() - t_start))
     if out_dir is not None:
         raw.save(os.path.join(out_dir, "Raw_Covariance.npz"))

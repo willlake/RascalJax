@@ -41,6 +41,16 @@ cov = res["full_theory_covariance"]      # joint, ordering (correlation, s, ell)
   mixed block and the cross pair counts `RR^AB` normalize them. Each input carries its own normalized `RR`
   counts in the covariance bins, its own `xi` table, and optionally its own jackknife `xi` and `RR` per region.
   All inputs must share the `s` edges and the number of `mu` bins.
+* **Normalization of the counts.** The kernel's pair counts are sums of effective weights normalized to unit sum
+  over the *whole catalog*. Counts measured with `pycorr` or `lsstypes` on the randoms selected for each bin are
+  normalized by the selected samples' weight sums instead, so they are larger by `1 / (F_A F_B)`, where `F_S` is
+  the fraction of the catalog's weight in sample `S` (about 0.6 for a bin holding 60% of the randoms). Declare the
+  convention with `CorrelationInput(..., rr_normalization=...)`: `"sample"` (the default) for estimator output,
+  which `run_cov` multiplies by `F_A F_B`; `"catalog"` for counts built directly from `Sample.effective_weights`
+  (the notebook and the brute-force script do this). The two coincide for a sample covering its whole catalog,
+  so single-sample runs are unaffected. `run_cov` logs the Monte Carlo estimate of every correlation's `RR`
+  divided by the input (`RR check`) and warns when it deviates by more than 5%: counts in the wrong convention
+  show up as a ratio equal to `F_A F_B`, and a mismatch between randoms and samples shows up there too.
 
 Any number of samples and catalogs can be mixed: several redshift bins of several tracers are several samples
 on several catalogs. Samples on different catalogs never share particles.
@@ -62,8 +72,16 @@ C3[c1,c2][a,b] = (1/g) sum_{i,j,k} Theta_a(ij) Theta_b(kj)
                                 + w_i^B (w_j^A w_j^D) w_k^C xi_BC(ik) + w_i^B (w_j^A w_j^C) w_k^D xi_BD(ik) ]
 
 C2[c1,c2][a,b] = delta_ab (1/g^2) sum_{i,j} Theta_a(ij)
-                                w_i^A w_j^B ( w_i^C w_j^D + w_i^D w_j^C ) ( 1 + xi_AB(ij) )
+                                w_i^A w_j^B ( w_i^C w_j^D + w_i^D w_j^C ) ( 1 + [xi_AB(ij) + xi_CD(ij)] / 2 )
 ```
+
+In `C2` both galaxies of the pair are shared, so the pair belongs to both correlations and its `1 + xi` is taken
+as the average of the two correlations' tables. This keeps the term independent of the order in which the samples
+are listed (before this choice the block AA x BB used `xi_AA` or `xi_BB` depending on the labelling). The two
+tables are the same function unless the measured correlation functions of the bins differ through redshift
+evolution or noise, in which case neither is strictly the correlation at the pair's redshift and the average is the
+symmetric choice. `C3` and `C4` need no such choice: their `xi` always connects two unshared particles whose
+samples are fixed by the term.
 
 These are the RascalC terms (Philcox et al. 2020, arXiv:1904.11070) with the data treated as a Poisson sampling
 of the randoms: `C4` has four distinct galaxies, `C3` one galaxy `j` common to both pairs, `C2` both galaxies in
@@ -97,6 +115,9 @@ For each catalog, the effective weights of every sample on that catalog are stac
 `membership` of shape `(n_samples, N)` in the cell-sorted particle order of the grid and stored in the
 catalog's `GridArrays`. Rows of samples that live on another catalog are zero. Sample indices are global, so the
 kernel can index `membership[A]` for any sample `A` on any grid.
+
+The input counts are converted to the kernel's normalization here (`rr_normalization`, section 2); the converted
+counts are what `RawCovariance.rr_input` holds and what the jackknife disconnected term uses.
 
 The `xi` lookups are indexed by sample pair: `xi_pair_index[A, B]` gives the row of the fine `xi` table built
 from the `CorrelationInput` of `(A, B)`. The importance-sampling kernel for drawing `k` around `i` and `l` around
@@ -160,8 +181,9 @@ pairs, divided by the draw probability and by `RR^c1_a RR^c2_b`:
 v = w_i[A] * w_j[B] * w_k[C] * w_l[D] * xi(A, C, r_ik, mu_ik) * xi(B, D, r_jl, mu_jl) / p / (rr[ca, bin_a] * rr[cb, bin_b])
 # T tensor (X, Y, Y', Z): shared particle j
 v = w_i[X] * w_j[Y] * w_j[Y2] * w_k[Z] * xi(X, Z, r_ik, mu_ik) / p / (rr[ca, bin_ij] * rr[cb, bin_kj])
-# C2 term (A, B, C, D)
-v = w_i[A] * w_j[B] * (w_i[C] * w_j[D] + w_i[D] * w_j[C]) * (1 + xi(A, B, r_ij, mu_ij)) / p / (rr[ca, bin_a] * rr[cb, bin_a])
+# C2 term (A, B, C, D): symmetric average of the two correlations' xi for the shared pair
+xi_pair = 0.5 * (xi(A, B, r_ij, mu_ij) + xi(C, D, r_ij, mu_ij))
+v = w_i[A] * w_j[B] * (w_i[C] * w_j[D] + w_i[D] * w_j[C]) * (1 + xi_pair) / p / (rr[ca, bin_a] * rr[cb, bin_a])
 ```
 
 A particle outside sample `B` has `w^B = 0` and silently drops out of every term that needs it in `B`; a particle in
@@ -225,6 +247,10 @@ one catalog with memberships.
   right when the randoms follow the data `n(z)`, so that galaxies per random is the same in every redshift slice
   (true for DESI randoms). `n_data` must count the galaxies in the full range of the catalog, not in one bin.
   Per-sample shot-noise levels or per-sample `alpha` are not supported.
+* **Counts must be in the declared convention** (section 2). Estimator output on the selected randoms is
+  `"sample"`-normalized, counts from the effective weights are `"catalog"`-normalized; mixing them up scales whole
+  blocks by powers of the weight fractions, which no shot-noise rescaling can absorb because `C4` scales too. The
+  `RR check` line of the log is the guard.
 * **All sample pairs need inputs.** `run_cov` raises if any pair `(i, j)` lacks a `CorrelationInput`, and
   `CorrelationInput` requires strictly positive `RR` in every bin. Two bins separated by a gap larger than `s_max`
   have no cross pairs and cannot be handled as is (a cross input with vanishing counts would be needed).
@@ -239,12 +265,14 @@ one catalog with memberships.
 1. Build one random catalog covering the union of the bins (e.g. 0.4 to 1.1 for three LRG bins) with the usual
    FKP weights, the per-random redshift, the jackknife region labels, and `n_data` = total galaxies in the union.
 2. Make one `Sample.from_redshift_range` per bin.
-3. Measure or load the pair counts of every pair of bins in the covariance binning: auto `RR^AA`, `RR^BB`, ... and
-   cross `RR^AB` between the data/randoms of bin A and those of bin B, with their correlation functions and, for the
-   jackknife calibration, the per-region `xi` and `RR`. `io_pycorr.correlation_input_from_pycorr` and
-   `io_lsstypes.correlation_input_from_lsstypes` convert single estimators; the cross estimator of two bins is
-   converted the same way. `scripts/desi_dr2_prepare.py` currently prepares one tracer and one bin only, so the
-   cross inputs have to be added for a multi-bin run.
+3. Measure or load the pair counts of every pair of bins in the covariance binning: the autos `RR^AA`, `RR^BB`, ...
+   and the cross counts `RR^AB` between the randoms of bin A and those of bin B, with their correlation functions
+   and, for the jackknife calibration, the per-region `xi` and `RR`. `io_pycorr.correlation_input_from_pycorr`
+   and `io_lsstypes.correlation_input_from_lsstypes` convert single estimators, autos and the cross alike. Such
+   estimators are normalized by the selected samples' weights, which is the default `rr_normalization="sample"`:
+   pass them as they come and let `run_cov` rescale them, without rescaling by hand as well. Then read the
+   `RR check` line of the log: the ratios must be 1 within the Monte Carlo noise. `scripts/desi_dr2_prepare.py`
+   currently prepares one tracer and one bin only, so the cross inputs have to be added for a multi-bin run.
 4. Call `run_cov` with the samples and the dictionary of all pairs, then `post_process`. The result is the joint
    covariance of all requested correlations, including the cross-correlation between bins; if only the autos are
    wanted, slice the corresponding blocks (they are correct on their own, the cross-correlation only needs to be
@@ -257,3 +285,6 @@ slabs of a periodic box and compares every block with the Monte Carlo estimates;
 `BENCHMARK.md` (`C2` within 0.5%, `C3` within 1 to 4%, `C4` within its Monte Carlo errors, for all six blocks),
 followed by the disjoint two-catalog case. `notebooks/03_overlapping_redshift_bins.ipynb` shows the same setup
 end to end, including building the three sets of pair counts with a KD-tree and inspecting the separate terms.
+Two unit tests in `tests/test_basic.py` cover the normalization conversion (sample- and catalog-normalized inputs
+give identical results, and a wrong declaration is flagged by the `RR check`) and the invariance of the 2-point
+term under a relabelling of the samples with different `xi` tables.

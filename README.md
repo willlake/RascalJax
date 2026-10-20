@@ -61,8 +61,12 @@ sA = rj.Sample.from_redshift_range(cat, z, 0.4, 0.7, "zA")
 sB = rj.Sample.from_redshift_range(cat, z, 0.6, 0.9, "zB")
 raw = rj.run_cov([sA, sB], {(0, 0): corr_AA, (0, 1): corr_AB, (1, 1): corr_BB}, ...)
 ```
-Here `corr_AB` holds the cross pair counts and cross-correlation function between the two redshift bins. How the
-cross terms between the bins are computed is explained in `OVERLAPPING_REDSHIFT_BINS.md`.
+Here `corr_AB` holds the cross pair counts and cross-correlation function between the two redshift bins. Pair counts
+from `pycorr` / `lsstypes` measured on the randoms selected for each bin are normalized per sample, which is the
+default `CorrelationInput(rr_normalization="sample")`; `run_cov` converts them to the catalog normalization of the
+kernel (counts built from `Sample.effective_weights` are passed with `rr_normalization="catalog"`). The log's
+`RR check` line compares the sampled pair counts with the inputs. How the cross terms between the bins are computed
+is explained in `OVERLAPPING_REDSHIFT_BINS.md`.
 
 ## Examples
 
@@ -70,6 +74,8 @@ cross terms between the bins are computed is explained in `OVERLAPPING_REDSHIFT_
 * `notebooks/02_desi_dr2_jackknife.ipynb` – DESI DR2 LRG per-cap run with jackknife calibration, comparison with the
   official RascalC covariance and the GLAM-Uchuu mocks, NGC+SGC combination;
 * `notebooks/03_overlapping_redshift_bins.ipynb` – joint covariance of two overlapping redshift bins.
+* `notebooks/04_desi_overlapping_bins_validation.ipynb` – the DESI DR2 LRG overlapping-bin covariance against 350
+  GLAM-Uchuu mocks (BENCHMARK.md section 6): variance ratios, cross-bin correlation, metrics, convergence.
 
 Validation scripts in `scripts/`: `gaussian_box.py` (analytic Gaussian covariance), `bruteforce_check.py` and
 `bruteforce_multi.py` (exact sums on small catalogs, single and multi-sample), `compare_rascalc_box.py` /

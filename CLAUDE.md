@@ -32,6 +32,11 @@ Conventions that must stay consistent across modules:
   unbiased but heavy-tailed and ruined the convergence of the DESI runs (N_eff 550 -> 6000 after the change).
   C3 is assembled from the shared-particle tensor `T[X,(Y,Y'),Z]` in four sharing cases. Diagonal blocks are
   symmetrized at the end.
+* Pair-count normalization: the kernel's RR are sums of effective weights normalized over the *whole* catalog.
+  `CorrelationInput.rr_normalization="sample"` (default; pycorr/lsstypes counts on the randoms selected for a
+  sample) is converted in `run_cov` by the samples' weight sums `F_A F_B`; `"catalog"` is passed through. The
+  `RR check` log line (sampled / input RR, warning above 5%) guards against a wrong convention. The C2 term uses
+  `1 + (xi_c1 + xi_c2) / 2` for the shared pair so that blocks do not depend on the order of the samples.
 * Jackknife weight tensor and its `1 - sum_A w_aA w_bA` normalization follow RascalC; the EE/RR disconnected
   arrays use the full-cell draw probability and `0.25 n_pairs` normalization (not RascalC's class-conditional one).
 

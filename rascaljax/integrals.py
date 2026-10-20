@@ -19,7 +19,9 @@ Accumulated terms, for every requested covariance block between correlations
 * ``T[X, (Y, Y'), Z][a, b] = sum w_i^X w_j^Y w_j^Y' w_k^Z xi_XZ(ik) Theta_a(ij) Theta_b(kj) / (RR_a RR_b)``,
   the 3-point term with the particle ``j`` shared by the two pairs (the four sharing cases of a block
   are assembled from ``T`` tensors by the driver);
-* ``C2[c1, c2][a] = sum w_i^A w_j^B (w_i^C w_j^D + w_i^D w_j^C) (1 + xi_AB(ij)) Theta_a(ij) / (RR^c1_a RR^c2_a)``;
+* ``C2[c1, c2][a] = sum w_i^A w_j^B (w_i^C w_j^D + w_i^D w_j^C) (1 + [xi_AB(ij) + xi_CD(ij)] / 2) Theta_a(ij) / (RR^c1_a RR^c2_a)``
+  (the symmetric average of the two correlations' xi for the shared pair keeps the term independent of the sample
+  labelling; the two tables differ only for overlapping samples with different measured correlation functions);
 * ``RR[c][a] = sum w_i^A w_j^B Theta_a(ij)`` (a Monte Carlo estimate of the input pair counts, for checks).
 
 With jackknives, the same terms weighted by the jackknife weight tensor (``C4j``, ``Tj``, ``C2j``) and the
@@ -375,10 +377,14 @@ def accumulate_batch(key, primary_idx, data: PassData, st: Static, acc: Accumula
     if st.c2_terms:
         vals, jvals, cache = [], [], {}
         for A, Bs, C, D, ca, cb in st.c2_terms:
-            if (A, Bs) not in cache:
-                cache[(A, Bs)] = xi(A, Bs, r_ij, mu_ij).reshape(-1)
+            # 1 + xi of the shared pair: symmetric average of the two correlations' tables (label-invariant)
+            k1, k2 = (min(A, Bs), max(A, Bs)), (min(C, D), max(C, D))
+            for key in (k1, k2):
+                if key not in cache:
+                    cache[key] = xi(key[0], key[1], r_ij, mu_ij).reshape(-1)
+            xi_pair = cache[k1] if k1 == k2 else 0.5 * (cache[k1] + cache[k2])
             ww = (wi[A] * w_j[Bs] * (wi[C] * w_j[D] + wi[D] * w_j[C])).reshape(-1)
-            v = ww * (1.0 + cache[(A, Bs)]) * inv_p2 / rrnorm(ca, cb, ba, ba)
+            v = ww * (1.0 + xi_pair) * inv_p2 / rrnorm(ca, cb, ba, ba)
             vals.append(v)
             if st.jackknife:
                 jvals.append(v * jackknife_weight_tensor(w_jk, jki2, jkj2, jki2, jkj2, ba, ba, ca, cb))

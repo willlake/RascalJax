@@ -178,3 +178,87 @@ def test_combine_regions_limits():
     bs = rj.Binning(np.array([20.0, 30, 40]), 3, None)
     A = rng.normal(size=(6, 6)); C = A @ A.T
     assert np.allclose(combine_regions([C, C], [np.ones(6), 3 * np.ones(6)], bs), C * (0.25**2 + 0.75**2))
+
+
+def _overlap_setup(N=3000, L=300.0, seed=1):
+    """Two overlapping z-slabs of a periodic box and their exact catalog-normalized RR counts."""
+    from scipy.spatial import cKDTree
+
+    rng = np.random.default_rng(seed)
+    pos = rng.uniform(0, L, size=(N, 3))
+    cat = rj.Catalog(pos, np.ones(N), n_data=N / 2, name="box")
+    z = pos[:, 2]
+    sA, sB = rj.Sample(cat, z < 0.6 * L, "A"), rj.Sample(cat, z >= 0.4 * L, "B")
+    s_edges = np.array([20.0, 40.0, 60.0])
+    n_mu = 2
+    binning = rj.Binning(s_edges, n_mu, None)
+    pairs = cKDTree(pos, boxsize=L).query_pairs(s_edges[-1], output_type="ndarray")
+    i, j = pairs[:, 0], pairs[:, 1]
+    d = pos[i] - pos[j]
+    d -= L * np.round(d / L)
+    r = np.sqrt((d**2).sum(axis=1))
+    b = binning.flat_bin(r, np.abs(d[:, 2]) / r)
+    ok = b >= 0
+    i, j, b = i[ok], j[ok], b[ok]
+    w = cat.weights
+
+    def rr(mS, mT):  # both orderings of each pair, as the kernel's ordered-pair sums
+        return np.bincount(b, weights=w[i] * w[j] * (mS[i] * mT[j] + mS[j] * mT[i]), minlength=binning.n_bins).reshape(len(s_edges) - 1, n_mu)
+
+    counts = {(0, 0): rr(sA.membership, sA.membership), (0, 1): rr(sA.membership, sB.membership), (1, 1): rr(sB.membership, sB.membership)}
+    kw = dict(mode="s_mu", n_mu=n_mu, N2=4, N3=3, N4=3, n_loops=2, loops_per_sample=1, boxsize=L, xi_cut=100.0, refine_iterations=0,
+              quads_per_batch=50_000, seed=1, n_side=11, log=lambda s: None)
+    return cat, sA, sB, s_edges, counts, kw
+
+
+def _power_law_table():
+    s_tab = np.arange(1.0, 150.0, 2.0)
+    return rj.XiTable.from_model(s_tab, np.linspace(0.1, 0.9, 5), np.repeat(((s_tab / 8) ** -1.8 * np.exp(-((s_tab / 80) ** 2)))[:, None], 5, axis=1))
+
+
+def test_rr_normalization_conventions():
+    """Sample-normalized counts (pycorr convention on the randoms selected for each sample) converted inside run_cov
+    must give the same result as catalog-normalized counts passed directly, and the RR self-check must flag a mismatch."""
+    cat, sA, sB, s_edges, counts, kw = _overlap_setup()
+    table = _power_law_table()
+    f = {0: sA.effective_weights.sum(), 1: sB.effective_weights.sum()}
+    assert 0.5 < f[0] < 0.7 and 0.5 < f[1] < 0.7
+    inp_cat = {k: rj.CorrelationInput(s_edges, v, table, rr_normalization="catalog") for k, v in counts.items()}
+    inp_smp = {k: rj.CorrelationInput(s_edges, v / (f[k[0]] * f[k[1]]), table) for k, v in counts.items()}  # default "sample"
+    raw_c = rj.run_cov([sA, sB], inp_cat, **kw)
+    raw_s = rj.run_cov([sA, sB], inp_smp, **kw)
+    assert np.allclose(raw_s.rr_input, raw_c.rr_input)
+    assert np.allclose(raw_s.c2, raw_c.c2) and np.allclose(raw_s.c3, raw_c.c3) and np.allclose(raw_s.c4, raw_c.c4)
+    assert np.allclose(raw_c.info["rr_factors"], 1.0)
+    assert np.allclose(raw_s.info["rr_factors"], [f[0] ** 2, f[0] * f[1], f[1] ** 2])
+    assert np.allclose(raw_c.info["rr_check"], 1.0, atol=0.1)
+    # sample-normalized counts declared as "catalog": the sampled RR disagrees with the inputs by the weight fractions
+    inp_bad = {k: rj.CorrelationInput(s_edges, v / (f[k[0]] * f[k[1]]), table, rr_normalization="catalog") for k, v in counts.items()}
+    raw_w = rj.run_cov([sA, sB], inp_bad, **kw)
+    assert np.allclose(raw_w.info["rr_check"], [f[0] ** 2, f[0] * f[1], f[1] ** 2], atol=0.1)
+    with pytest.raises(ValueError):
+        rj.CorrelationInput(s_edges, counts[(0, 0)], table, rr_normalization="parent")
+
+
+def test_c2_invariant_under_sample_relabelling():
+    """With a different xi table per correlation, the 2-point term of a block must not depend on which sample is
+    listed first (symmetric average of the two correlations' xi for the shared pair)."""
+    cat, sA, sB, s_edges, counts, kw = _overlap_setup()
+    s_tab = np.arange(1.0, 150.0, 2.0)
+    mu_tab = np.linspace(0.1, 0.9, 5)
+
+    def const(c):
+        return rj.XiTable.from_model(s_tab, mu_tab, np.full((len(s_tab), len(mu_tab)), c))
+
+    tabs = {(0, 0): const(0.1), (0, 1): const(0.2), (1, 1): const(0.5)}
+    inp1 = {k: rj.CorrelationInput(s_edges, counts[k], tabs[k], rr_normalization="catalog") for k in counts}
+    swap = {(0, 0): (1, 1), (0, 1): (0, 1), (1, 1): (0, 0)}  # samples listed as [B, A]: (0,0) is BB, (0,1) is BA, (1,1) is AA
+    inp2 = {k: rj.CorrelationInput(s_edges, counts[swap[k]], tabs[swap[k]], rr_normalization="catalog") for k in counts}
+    r1 = rj.run_cov([sA, sB], inp1, **kw)
+    r2 = rj.run_cov([sB, sA], inp2, **kw)
+    c2_1, c2_2 = r1.c2.sum(axis=0), r2.c2.sum(axis=0)
+    # the same pair draws enter both runs: the physical AA x BB block ((0, 2) in run 1, (2, 0) in run 2) and the
+    # AA x AA block must agree to rounding; before the symmetric xi they differed by (1 + 0.5) / (1 + 0.1)
+    assert np.allclose(c2_2[:, 2, 0], c2_1[:, 0, 2], rtol=1e-10)
+    assert np.allclose(c2_2[:, 2, 2], c2_1[:, 0, 0], rtol=1e-10)
+    assert not np.allclose(c2_1[:, 0, 2], 0)

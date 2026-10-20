@@ -98,7 +98,8 @@ def n_data_from_pycorr(est) -> float:
 
 def save_correlation_input(ci: CorrelationInput, filename: str, **extra) -> None:
     """Save a :class:`CorrelationInput` (and extra arrays) to npz, for use without pycorr."""
-    d = dict(s_edges=ci.s_edges, rr=ci.rr, xi_s=ci.xi_table.s_vals, xi_mu=ci.xi_table.mu_vals, xi=ci.xi_table.xi)
+    d = dict(s_edges=ci.s_edges, rr=ci.rr, rr_normalization=np.array(ci.rr_normalization), xi_s=ci.xi_table.s_vals,
+             xi_mu=ci.xi_table.mu_vals, xi=ci.xi_table.xi)
     if ci.xi_table.s_edges is not None:
         d["xi_s_edges"] = ci.xi_table.s_edges
     if ci.jackknife:
@@ -112,6 +113,7 @@ def load_correlation_input(filename: str) -> tuple[CorrelationInput, dict]:
         d = dict(f)
     table = XiTable(d["xi_s"], d["xi_mu"], d["xi"], d.get("xi_s_edges"))
     kw = {k: d[k] for k in ("jack_xi", "jack_rr", "jack_labels") if k in d}
-    ci = CorrelationInput(d["s_edges"], d["rr"], table, **kw)
-    extra = {k: v for k, v in d.items() if k not in ("s_edges", "rr", "xi_s", "xi_mu", "xi", "xi_s_edges", "jack_xi", "jack_rr", "jack_labels")}
+    norm = str(d["rr_normalization"]) if "rr_normalization" in d else "sample"
+    ci = CorrelationInput(d["s_edges"], d["rr"], table, rr_normalization=norm, **kw)
+    extra = {k: v for k, v in d.items() if k not in ("s_edges", "rr", "rr_normalization", "xi_s", "xi_mu", "xi", "xi_s_edges", "jack_xi", "jack_rr", "jack_labels")}
     return ci, extra
